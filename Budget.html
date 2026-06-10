@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Budget AI"/>
+  <meta name="theme-color" content="#0F1117"/>
+  <title>Family Budget AI</title>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>*{margin:0;padding:0;box-sizing:border-box;}body{background:#0F1117;}</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+const { useState, useRef, useCallback, useEffect } = React;
+
+// ─── Palette ────────────────────────────────────────────────────────────────
+const C = {
+  bg:"#0F1117",surface:"#181C27",card:"#1E2336",border:"#262D42",
+  accent:"#5B8AF5",accentSoft:"#1C2D52",green:"#3ECFA0",greenSoft:"#0F2E25",
+  red:"#F26B5E",redSoft:"#2E1210",amber:"#F5B942",amberSoft:"#2E2210",
+  text:"#E8EAEE",muted:"#7B84A0",dimmed:"#3D4460",purple:"#A78BFA",purpleSoft:"#2D1F52",
+};
+
+// ─── Category map (Raiffeisen Serbia + RSD/EUR aware) ───────────────────────
+const CATEGORIES = {
+  "🍽️ Hrana"    :["maxi","lidl","idea","dis","delhaize","pekara","restoran","fast food","mcdonalds","kfc","pizza","kafic","kafana","supermarket","grocery","market","shop"],
+  "🚗 Prevoz"   :["taxi","car go","yandex","bolt","uber","gorivo","benzin","petrol","parking","nis petrol","beopetrol","bus","tram","beograd na vodi","metro"],
+  "🏠 Stambeni" :["kirija","stanarina","rent","komunal","struja","edb","water","voda","gas","srbijagas","infostan","skupstina","upravnik","zgrada"],
+  "🏦 Hipoteka" :["hipoteka","kredit","loan","mortgage","annuitet","anuitet","otplata","raiffeisen kredit","stambeni kredit"],
+  "💊 Zdravlje" :["apoteka","pharmacy","klinika","doktor","bolnica","dental","stomatolog","analiza","lab","dragic","benu"],
+  "🎬 Zabava"   :["netflix","spotify","hbo","apple","steam","igra","game","bioskop","pozoriste","koncert","youtube"],
+  "🛍️ Kupovina":["zara","h&m","primark","reserved","lcwaikiki","ozon","wildberries","sport","mango","fashion","obuca","odeca"],
+  "📱 Telefon"  :["telekom","yettel","a1","mts","internet","vip","telenor","mobilni"],
+  "✈️ Putovanje":["air serbia","wizair","ryanair","hotel","booking","airbnb","hostel","voz","zeleznica","bus karta"],
+  "📚 Obrazovanje":["kurs","knjiga","skola","faculty","udemy","coursera","lingua","engleski"],
+  "💰 Prenos"   :["prenos","transfer","uplata","povracaj","refund","sbp","menjacnica","exchange"],
+  "💼 Prihod"   :["plata","salary","zarada","honorar","freelance","naknada","dividenda","income","isplata"],
+  "🏧 Banka"    :["provizija","naknada","fee","commission","kamate","interest","raiffeisen"],
+  "🔧 Ostalo"   :[],
+};
+
+function categorize(desc) {
+  const l = (desc||"").toLowerCase();
+  for (const [cat,kws] of Object.entries(CATEGORIES)) {
+    if (kws.some(k=>l.includes(k))) return cat;
+  }
+  return "🔧 Ostalo";
+}
+
+// ─── Raiffeisen Serbia CSV parser ────────────────────────────────────────────
+// Format: "DD.MM.YYYY";"Description";"Debit";"Credit";"Balance";"Currency"
+// Also handles simpler: date;desc;amount
+function parseRaiffeisen(text) {
+  const lines = text.trim().split(/\r?\n/).filter(l=>l.trim());
+  const txs = [];
+  for (const line of lines) {
+    // Split by ; or , or tab, strip quotes
+    const parts = line.split(/[;,\t]/).map(s=>s.trim().replace(/^["']|["']$/g,""));
+    if (parts.length < 2) continue;
+
+    let date=null, desc="", amount=0, currency="RSD";
+
+    // Detect date in any part
+    for (const p of parts) {
+      if (!date && /^\d{1,2}\.\d{1,2}\.\d{4}$/.test(p)) { date=p; }
+      else if (!date && /^\d{4}-\d{2}-\d{2}/.test(p)) { date=p.slice(0,10).split("-").reverse().join("."); }
+      else if (!date && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(p)) {
+        const [m,d,y]=p.split("/"); date=`${d.padStart(2,"0")}.${m.padStart(2,"0")}.${y}`;
+      }
+    }
+
+    // Raiffeisen 6-col format: date;desc;debit;credit;balance;currency
+    if (parts.length >= 4) {
+      desc = parts.find((p,i)=>i>0 && p.length>2 && !/^[\d.,\-\s]+$/.test(p) && !/^\d{1,2}[.\/]\d{1,2}[.\/]\d{4}$/.test(p)) || "";
+      // debit (col 2 if numeric) and credit (col 3)
+      const nums = parts.map(p=>{
+        const n=parseFloat(p.replace(/\s/g,"").replace(",","."));
+        return isNaN(n)?null:n;
+      });
+      // currency from last meaningful column
+      const cur = parts.find(p=>/^(RSD|EUR|USD|CHF|GBP)$/i.test(p));
+      if (cur) currency = cur.toUpperCase();
+
+      // Find debit / credit columns (non-zero)
+      const numericCols = nums.map((v,i)=>({v,i})).filter(x=>x.v!==null&&x.v!==0);
+      if (numericCols.length >= 2) {
+        const debit  = numericCols.find(x=>x.i===2)?.v || 0;
+        const credit = numericCols.find(x=>x.i===3)?.v || 0;
+        if (debit > 0)  amount = -debit;
+        else if (credit > 0) amount = credit;
+      } else if (numericCols.length === 1) {
+        amount = numericCols[0].v;
+      }
+    } else {
+      // Simple 3-col
+      desc = parts.find(p=>p.length>2 && !/^[\d.,\-\s]+$/.test(p)&&!/^\d{1,2}[.\/]\d{1,2}[.\/]\d{4}$/.test(p)) || parts[1]||"";
+      const numParts = parts.filter(p=>/^-?[\d\s.,]+$/.test(p.replace(/\s/g,"")));
+      if (numParts.length) amount = parseFloat(numParts[numParts.length-1].replace(/\s/g,"").replace(",","."));
+    }
+
+    if (desc && amount !== 0) {
+      txs.push({
+        id: Math.random().toString(36).slice(2),
+        date: date || new Date().toLocaleDateString("sr-RS"),
+        description: desc, amount, currency,
+        category: categorize(desc),
+        type: amount < 0 ? "expense" : "income",
+      });
+    }
+  }
+  return txs;
+}
+
+// ─── Build AI context ────────────────────────────────────────────────────────
+function buildContext(transactions, mortgage) {
+  let ctx = "";
+  if (transactions.length) {
+    const byCat={}, byMonth={};
+    let totalIn=0, totalEx=0;
+    for (const t of transactions) {
+      byCat[t.category]=(byCat[t.category]||0)+t.amount;
+      const m=t.date.slice(0,7).split(".").reverse().slice(1).join("-") || t.date.slice(0,7);
+      if (!byMonth[m]) byMonth[m]={income:0,expense:0};
+      if (t.type==="income"){byMonth[m].income+=t.amount;totalIn+=t.amount;}
+      else {byMonth[m].expense+=Math.abs(t.amount);totalEx+=Math.abs(t.amount);}
+    }
+    ctx += `FINANSIJSKI PODACI (${transactions.length} transakcija):\nUkupan prihod: ${totalIn.toFixed(0)}\nUkupni rashodi: ${totalEx.toFixed(0)}\nBilans: ${(totalIn-totalEx).toFixed(0)}\n\n`;
+    ctx += "PO KATEGORIJAMA:\n"+Object.entries(byCat).sort((a,b)=>a[1]-b[1]).map(([c,v])=>`${c}: ${v.toFixed(0)}`).join("\n")+"\n\n";
+    ctx += "PO MESECIMA:\n"+Object.entries(byMonth).sort().map(([m,v])=>`${m}: prihod ${v.income.toFixed(0)}, rashod ${v.expense.toFixed(0)}`).join("\n")+"\n\n";
+  } else {
+    ctx += "Podaci o transakcijama nisu učitani.\n\n";
+  }
+  if (mortgage.enabled) {
+    const bal = mortgage.balance, rate = mortgage.rate/100/12, pmt = mortgage.payment;
+    let months=0, bal2=bal, totalInterest=0;
+    while (bal2>0 && months<600) {
+      const int=bal2*rate; const prin=pmt-int;
+      if (prin<=0) break;
+      totalInterest+=int; bal2-=prin; months++;
+    }
+    const extraMonths = mortgage.extraMonthly>0 ? (() => {
+      let b=bal,m=0;
+      while(b>0&&m<600){const i=b*rate;const p=(pmt+mortgage.extraMonthly)-i;if(p<=0)break;b-=p;m++;}
+      return m;
+    })() : null;
+    ctx += `HIPOTEKA:\nOstatak duga: ${bal.toLocaleString()} ${mortgage.currency}\nKamatna stopa: ${mortgage.rate}% godišnje\nMesečna rata: ${pmt.toLocaleString()} ${mortgage.currency}\nDo otplate (bez prevremenih): ~${months} meseci (${(months/12).toFixed(1)} godina)\nUkupna kamata: ~${totalInterest.toFixed(0)} ${mortgage.currency}\n`;
+    if (extraMonths!==null) ctx += `Sa dodatnim ${mortgage.extraMonthly}/mes: ~${extraMonths} meseci — ušteda ${months-extraMonths} meseci\n`;
+    if (mortgage.notes) ctx += `Beleška: ${mortgage.notes}\n`;
+  }
+  return ctx;
+}
+
+// ─── Mortgage calculator logic ───────────────────────────────────────────────
+function calcSchedule(balance, annualRate, payment, extraMonthly=0, extraOneTime=0) {
+  const rate = annualRate/100/12;
+  const rows = [];
+  let bal = balance - extraOneTime;
+  let month = 0;
+  while (bal > 0.01 && month < 600) {
+    month++;
+    const interest = bal * rate;
+    const principal = (payment + extraMonthly) - interest;
+    if (principal <= 0) break;
+    bal = Math.max(0, bal - principal);
+    rows.push({ month, interest: +interest.toFixed(2), principal: +principal.toFixed(2), balance: +bal.toFixed(2) });
+    if (bal < 0.01) break;
+  }
+  return rows;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+const CAT_COLORS=["#5B8AF5","#3ECFA0","#F5B942","#F26B5E","#A78BFA","#34D399","#FB923C","#60A5FA","#F472B6","#4ADE80","#FACC15","#E879F9"];
+
+function fmt(n,dec=0){return Number(n).toLocaleString("sr-RS",{maximumFractionDigits:dec});}
+
+function BarChart({data}){
+  const max=Math.max(...data.map(d=>Math.abs(d.value)),1);
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    {data.map((d,i)=>(
+      <div key={d.label} style={{display:"flex",alignItems:"center",gap:8}}>
+        <div style={{width:130,fontSize:11,color:C.muted,textAlign:"right",flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.label}</div>
+        <div style={{flex:1,height:18,background:C.border,borderRadius:3,overflow:"hidden"}}>
+          <div style={{height:"100%",borderRadius:3,width:`${(Math.abs(d.value)/max)*100}%`,background:CAT_COLORS[i%CAT_COLORS.length],transition:"width 0.6s ease"}}/>
+        </div>
+        <div style={{width:80,fontSize:11,color:C.text,textAlign:"right",flexShrink:0}}>{fmt(d.value)}</div>
+      </div>
+    ))}
+  </div>;
+}
+
+function TxRow({t}){
+  const isIn=t.type==="income";
+  return <div style={{display:"flex",alignItems:"center",padding:"8px 12px",borderBottom:`1px solid ${C.border}`,gap:10}}>
+    <div style={{fontSize:18,width:28,textAlign:"center",flexShrink:0}}>{t.category.split(" ")[0]}</div>
+    <div style={{flex:1,minWidth:0}}>
+      <div style={{fontSize:13,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</div>
+      <div style={{fontSize:11,color:C.muted}}>{t.date} · {t.currency} · {t.category.split(" ").slice(1).join(" ")}</div>
+    </div>
+    <div style={{fontSize:13,fontWeight:600,color:isIn?C.green:C.red,flexShrink:0}}>
+      {isIn?"+":""}{fmt(t.amount)} {t.currency}
+    </div>
+  </div>;
+}
+
+function Message({msg}){
+  const isUser=msg.role==="user";
+  return <div style={{display:"flex",justifyContent:isUser?"flex-end":"flex-start",marginBottom:12}}>
+    {!isUser&&<div style={{width:28,height:28,borderRadius:"50%",background:C.accentSoft,border:`1.5px solid ${C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0,marginRight:8,marginTop:2}}>💡</div>}
+    <div style={{maxWidth:"82%",padding:"10px 14px",borderRadius:isUser?"16px 16px 4px 16px":"16px 16px 16px 4px",background:isUser?C.accentSoft:C.card,border:`1px solid ${isUser?C.accent:C.border}`,fontSize:13.5,color:C.text,lineHeight:1.6,whiteSpace:"pre-wrap"}}>
+      {msg.content}
+    </div>
+  </div>;
+}
+
+function Field({label,value,onChange,type="number",placeholder="",suffix="",style={}}){
+  return <div style={{display:"flex",flexDirection:"column",gap:4,...style}}>
+    <label style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:0.5}}>{label}</label>
+    <div style={{display:"flex",alignItems:"center",background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,overflow:"hidden"}}>
+      <input type={type} value={value} onChange={onChange} placeholder={placeholder}
+        style={{flex:1,background:"none",border:"none",padding:"9px 12px",color:C.text,fontSize:13,outline:"none",width:"100%"}}/>
+      {suffix&&<span style={{padding:"0 10px",color:C.muted,fontSize:12,flexShrink:0}}>{suffix}</span>}
+    </div>
+  </div>;
+}
+
+// ─── Mortgage Panel ───────────────────────────────────────────────────────────
+function MortgagePanel({mortgage,setMortgage}){
+  const [extraOne,setExtraOne]=useState(0);
+  const schedule = calcSchedule(mortgage.balance, mortgage.rate, mortgage.payment, mortgage.extraMonthly, extraOne);
+  const scheduleBase = calcSchedule(mortgage.balance, mortgage.rate, mortgage.payment, 0, 0);
+  const totalInt = schedule.reduce((s,r)=>s+r.interest,0);
+  const totalIntBase = scheduleBase.reduce((s,r)=>s+r.interest,0);
+  const savedMonths = scheduleBase.length - schedule.length;
+  const savedInterest = totalIntBase - totalInt;
+  const payoffDate = (() => {
+    const d=new Date(); d.setMonth(d.getMonth()+schedule.length); 
+    return d.toLocaleDateString("sr-RS",{month:"long",year:"numeric"});
+  })();
+
+  // Mini chart: balance over time (every 12 months)
+  const chartPoints = [];
+  for (let i=0;i<schedule.length;i+=Math.max(1,Math.floor(schedule.length/24))) {
+    chartPoints.push({x:i,y:schedule[i].balance});
+  }
+  chartPoints.push({x:schedule.length,y:0});
+  const maxBal = mortgage.balance;
+  const chartW=280, chartH=80;
+  const pts = chartPoints.map(p=>`${(p.x/schedule.length)*chartW},${chartH-(p.y/maxBal)*chartH}`).join(" ");
+
+  return <div style={{display:"flex",flexDirection:"column",gap:16}}>
+    {/* Inputs */}
+    <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
+      <div style={{fontSize:13,fontWeight:600,marginBottom:14,color:C.text}}>⚙️ Параметры ипотеки</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        <Field label="Остаток долга" value={mortgage.balance} onChange={e=>setMortgage(m=>({...m,balance:+e.target.value}))} suffix={mortgage.currency}/>
+        <Field label="Ставка в год" value={mortgage.rate} onChange={e=>setMortgage(m=>({...m,rate:+e.target.value}))} suffix="%"/>
+        <Field label="Месячный платёж" value={mortgage.payment} onChange={e=>setMortgage(m=>({...m,payment:+e.target.value}))} suffix={mortgage.currency}/>
+        <div style={{display:"flex",flexDirection:"column",gap:4}}>
+          <label style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:0.5}}>Валюта</label>
+          <select value={mortgage.currency} onChange={e=>setMortgage(m=>({...m,currency:e.target.value}))}
+            style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 12px",color:C.text,fontSize:13,outline:"none"}}>
+            {["RSD","EUR","CHF","USD"].map(c=><option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <Field label="Доп. платёж/мес" value={mortgage.extraMonthly} onChange={e=>setMortgage(m=>({...m,extraMonthly:+e.target.value}))} suffix={mortgage.currency}/>
+        <Field label="Разовый доп. платёж" value={extraOne} onChange={e=>setExtraOne(+e.target.value)} suffix={mortgage.currency}/>
+      </div>
+      <div style={{marginTop:12}}>
+        <Field label="Заметки (банк, условия...)" value={mortgage.notes} onChange={e=>setMortgage(m=>({...m,notes:e.target.value}))} type="text" placeholder="Raiffeisen, переменная ставка..."/>
+      </div>
+    </div>
+
+    {/* KPIs */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:12}}>
+      {[
+        {label:"Срок погашения",value:payoffDate,color:C.accent},
+        {label:"Месяцев осталось",value:`${schedule.length} мес.`,color:C.text},
+        {label:"Всего процентов",value:`${fmt(totalInt)} ${mortgage.currency}`,color:C.red},
+        {label:"Экономия (досрочно)",value:savedMonths>0?`${savedMonths} мес. / ${fmt(savedInterest)} ${mortgage.currency}`:"Нет доп. платежей",color:C.green},
+      ].map(k=>(
+        <div key={k.label} style={{background:C.card,borderRadius:12,padding:14,border:`1px solid ${C.border}`}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:0.4}}>{k.label}</div>
+          <div style={{fontSize:14,fontWeight:700,color:k.color}}>{k.value}</div>
+        </div>
+      ))}
+    </div>
+
+    {/* Balance curve */}
+    <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
+      <div style={{fontSize:13,fontWeight:600,marginBottom:12}}>📉 График остатка долга</div>
+      <svg width="100%" viewBox={`0 0 ${chartW} ${chartH+10}`} style={{overflow:"visible"}}>
+        <defs>
+          <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={C.accent} stopOpacity="0.3"/>
+            <stop offset="100%" stopColor={C.accent} stopOpacity="0"/>
+          </linearGradient>
+        </defs>
+        <polygon points={`0,${chartH} ${pts} ${chartW},${chartH}`} fill="url(#grad)"/>
+        <polyline points={pts} fill="none" stroke={C.accent} strokeWidth="2"/>
+      </svg>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.muted,marginTop:4}}>
+        <span>Сейчас: {fmt(mortgage.balance)} {mortgage.currency}</span>
+        <span>→ {payoffDate}</span>
+      </div>
+    </div>
+
+    {/* Amortisation table (first 24 rows) */}
+    <div style={{background:C.card,borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
+      <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:600}}>График платежей (первые 24 мес.)</div>
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead>
+            <tr style={{background:C.bg}}>
+              {["Мес.","Платёж","% часть","Осн. часть","Остаток"].map(h=>(
+                <th key={h} style={{padding:"8px 12px",color:C.muted,textAlign:"right",fontWeight:500,whiteSpace:"nowrap"}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {schedule.slice(0,24).map((r,i)=>(
+              <tr key={r.month} style={{borderTop:`1px solid ${C.border}`,background:i%2===0?"transparent":C.surface}}>
+                <td style={{padding:"7px 12px",color:C.muted,textAlign:"right"}}>{r.month}</td>
+                <td style={{padding:"7px 12px",color:C.text,textAlign:"right"}}>{fmt(mortgage.payment+mortgage.extraMonthly)}</td>
+                <td style={{padding:"7px 12px",color:C.red,textAlign:"right"}}>{fmt(r.interest)}</td>
+                <td style={{padding:"7px 12px",color:C.green,textAlign:"right"}}>{fmt(r.principal)}</td>
+                <td style={{padding:"7px 12px",color:C.text,textAlign:"right",fontWeight:500}}>{fmt(r.balance)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {schedule.length>24&&<div style={{padding:"10px 16px",fontSize:12,color:C.muted,borderTop:`1px solid ${C.border}`}}>... ещё {schedule.length-24} платежей до полного погашения</div>}
+    </div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+function App() {
+  const [tab,setTab]=useState("upload");
+  const [transactions,setTransactions]=useState([]);
+  const [messages,setMessages]=useState([{role:"assistant",content:"Zdravo! Ja sam tvoj finansijski asistent 👋\n\nUčitaj izvod Raiffeisen banke Srbija (CSV) ili unesi podatke ručno. Mogu da analiziram troškove, prognouziram budžet, pomognem sa strategijom štednje i kalkulišem otplatu hipoteke sa prevremenim uplatama."}]);
+  const [chatInput,setChatInput]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [pasteText,setPasteText]=useState("");
+  const [txFilter,setTxFilter]=useState("all");
+  const [mortgage,setMortgage]=useState({enabled:false,balance:50000,rate:4.5,payment:600,extraMonthly:0,currency:"EUR",notes:""});
+  const chatEndRef=useRef(null);
+  const fileRef=useRef(null);
+
+  useEffect(()=>{chatEndRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
+
+  const processText=useCallback((text)=>{
+    const parsed=parseRaiffeisen(text);
+    if(!parsed.length){alert("Nije moguće prepoznati transakcije. Proverite format fajla (CSV izvod Raiffeisen Srbija).");return;}
+    setTransactions(prev=>[...prev,...parsed]);
+    setTab("overview");
+  },[]);
+
+  const handleFile=useCallback((file)=>{
+    const r=new FileReader();
+    r.onload=e=>processText(e.target.result);
+    r.readAsText(file,"UTF-8");
+  },[processText]);
+
+  const sendMessage=async()=>{
+    if(!chatInput.trim()||loading)return;
+    const userMsg={role:"user",content:chatInput.trim()};
+    setChatInput("");
+    setMessages(prev=>[...prev,userMsg]);
+    setLoading(true);
+    const ctx=buildContext(transactions,mortgage);
+    const sys=`Ti si iskusan lični finansijski savetnik i analitičar porodičnog budžeta za korisnika koji živi u Srbiji. Odgovaraj na ruskom jeziku (korisnik govori ruski).
+
+Imaš pristup sledećim finansijskim podacima korisnika:
+${ctx}
+
+Tvoje mogućnosti:
+- Analiza prihoda i rashoda po kategorijama
+- Otkrivanje anomalnih troškova
+- Prognoziranje troškova za sledeći mesec
+- Saveti za optimizaciju budžeta
+- Strategije štednje (pravilo 50/30/20, hitni fond 3-6 mes., investicije)
+- Kalkulacija otplate hipoteke sa prevremenim uplatama, analiza isplativosti
+- Odgovori na konkretna pitanja o troškovima
+
+Budi konkretan, koristi brojke iz podataka. Piši kratko i jasno, koristi emoji za preglednost. Valute su RSD i EUR (Srbija).`;
+
+    const history=messages.slice(-10).map(m=>({role:m.role,content:m.content}));
+    history.push(userMsg);
+    try {
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:history}),
+      });
+      const data=await res.json();
+      const reply=data.content?.map(b=>b.text||"").join("")||"Не удалось получить ответ.";
+      setMessages(prev=>[...prev,{role:"assistant",content:reply}]);
+    } catch {
+      setMessages(prev=>[...prev,{role:"assistant",content:"⚠️ Ошибка API. Проверь подключение."}]);
+    } finally { setLoading(false); }
+  };
+
+  const income=transactions.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+  const expense=transactions.filter(t=>t.type==="expense").reduce((s,t)=>s+Math.abs(t.amount),0);
+  const balance=income-expense;
+  const expByCat={};
+  for(const t of transactions.filter(t=>t.type==="expense")) expByCat[t.category]=(expByCat[t.category]||0)+Math.abs(t.amount);
+  const catData=Object.entries(expByCat).sort((a,b)=>b[1]-a[1]).map(([label,value])=>({label,value}));
+  const filtered=txFilter==="all"?transactions:transactions.filter(t=>t.type===txFilter);
+
+  const TABS=[
+    {id:"upload",label:"Загрузка"},
+    {id:"overview",label:"Обзор",disabled:!transactions.length},
+    {id:"mortgage",label:"Ипотека"},
+    {id:"chat",label:"ИИ-чат"},
+  ];
+
+  return <div style={{background:C.bg,minHeight:"100vh",fontFamily:"'Inter','SF Pro Display',system-ui,sans-serif",color:C.text}}>
+    {/* Header */}
+    <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <div style={{width:32,height:32,borderRadius:8,background:`linear-gradient(135deg,${C.accent},#8B5CF6)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>💎</div>
+        <div>
+          <div style={{fontSize:15,fontWeight:700,letterSpacing:-0.3}}>Family Budget AI</div>
+          <div style={{fontSize:10,color:C.muted,letterSpacing:0.5,textTransform:"uppercase"}}>Raiffeisen Serbia · RSD / EUR</div>
+        </div>
+      </div>
+      {transactions.length>0&&<div style={{display:"flex",gap:6,alignItems:"center"}}>
+        <div style={{background:C.greenSoft,color:C.green,fontSize:11,padding:"3px 8px",borderRadius:20,border:`1px solid ${C.green}33`}}>{transactions.length} operacija</div>
+        <button onClick={()=>{setTransactions([]);setTab("upload");}} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:11,padding:"3px 8px",borderRadius:20,cursor:"pointer"}}>Očisti</button>
+      </div>}
+    </div>
+
+    {/* Tabs */}
+    <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,display:"flex",padding:"0 20px",overflowX:"auto"}}>
+      {TABS.map(t=>(
+        <button key={t.id} onClick={()=>!t.disabled&&setTab(t.id)}
+          style={{background:"none",border:"none",padding:"12px 16px",cursor:t.disabled?"default":"pointer",
+            color:tab===t.id?C.accent:t.disabled?C.dimmed:C.muted,fontSize:13,fontWeight:tab===t.id?600:400,
+            borderBottom:tab===t.id?`2px solid ${C.accent}`:"2px solid transparent",marginBottom:-1,transition:"color 0.2s",whiteSpace:"nowrap"}}>
+          {t.label}{t.id==="mortgage"&&mortgage.enabled?" 🏦":""}
+        </button>
+      ))}
+    </div>
+
+    <div style={{maxWidth:800,margin:"0 auto",padding:"20px 16px"}}>
+
+      {/* ── UPLOAD ── */}
+      {tab==="upload"&&<div style={{display:"flex",flexDirection:"column",gap:16}}>
+        <div onClick={()=>fileRef.current?.click()}
+          style={{border:`2px dashed ${C.border}`,borderRadius:16,padding:"40px 24px",textAlign:"center",background:C.card,cursor:"pointer"}}>
+          <input ref={fileRef} type="file" accept=".csv,.txt,.xls,.xlsx" style={{display:"none"}}
+            onChange={e=>{const f=e.target.files[0];if(f)handleFile(f);}}/>
+          <div style={{fontSize:40,marginBottom:12}}>📂</div>
+          <div style={{fontSize:15,fontWeight:600,marginBottom:6}}>Загрузить выписку Raiffeisen</div>
+          <div style={{fontSize:13,color:C.muted}}>CSV / TXT — экспорт из интернет-банка raiffeisenbank.rs</div>
+        </div>
+
+        {/* Raiffeisen format guide */}
+        <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
+          <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Как получить выписку Raiffeisen Serbia</div>
+          {[
+            {step:"1",text:'Войти на raiffeisenbank.rs → «Internet bankarstvo»'},
+            {step:"2",text:'Раздел «Izvodi i transakcije» → выбрать счёт'},
+            {step:"3",text:'Выбрать период → нажать «Preuzmi» (скачать) → формат CSV'},
+            {step:"4",text:'Загрузить файл выше или вставить содержимое в поле ниже'},
+          ].map(s=>(
+            <div key={s.step} style={{display:"flex",gap:10,marginBottom:8,alignItems:"flex-start"}}>
+              <div style={{width:20,height:20,borderRadius:"50%",background:C.accentSoft,border:`1px solid ${C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:C.accent,flexShrink:0}}>{s.step}</div>
+              <div style={{fontSize:13,color:C.text,lineHeight:1.5}}>{s.text}</div>
+            </div>
+          ))}
+          <div style={{marginTop:10,padding:"10px 12px",background:C.accentSoft,borderRadius:8,fontSize:12,color:C.muted}}>
+            📌 Формат CSV: <code style={{color:C.accent}}>DD.MM.YYYY;Opis;Zaduženje;Odobrenje;Stanje;Valuta</code>
+          </div>
+        </div>
+
+        <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
+          <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Или вставить данные вручную</div>
+          <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)}
+            placeholder={"01.06.2025;Maxi supermarket;1850;;98150;RSD\n05.06.2025;Car Go taksi;450;;97700;RSD\n10.06.2025;Plata;85000;;182700;RSD"}
+            style={{width:"100%",height:120,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",color:C.text,fontFamily:"monospace",fontSize:12,resize:"vertical",outline:"none",boxSizing:"border-box"}}/>
+          <button onClick={()=>{if(pasteText.trim())processText(pasteText);}}
+            style={{marginTop:10,background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"9px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+            Разобрать данные →
+          </button>
+        </div>
+
+        <button onClick={()=>{
+          processText(`01.05.2025;Plata maj;0;95000;95000;RSD
+03.05.2025;Maxi Beograd;3200;0;91800;RSD
+05.05.2025;Car Go;520;0;91280;RSD
+07.05.2025;Netflix;1200;0;90080;RSD
+08.05.2025;Apoteka Benu;2800;0;87280;RSD
+10.05.2025;Idea market;4100;0;83180;RSD
+12.05.2025;Hipoteka rata maj;72000;0;11180;RSD
+14.05.2025;A1 internet;1800;0;9380;RSD
+16.05.2025;Zara;5200;0;4180;RSD
+18.05.2025;Car Go;380;0;3800;RSD
+22.05.2025;Lidl;3100;0;700;RSD
+01.06.2025;Plata jun;0;95000;95700;RSD
+02.06.2025;Freelance honorar;0;25000;120700;RSD
+03.06.2025;Maxi Beograd;2800;0;117900;RSD
+05.06.2025;Car Go taksi;450;0;117450;RSD
+07.06.2025;Klinika Medsi;4500;0;112950;RSD
+09.06.2025;Idea market;2100;0;110850;RSD
+11.06.2025;Hipoteka rata jun;72000;0;38850;RSD
+13.06.2025;A1 mobilni;1800;0;37050;RSD
+15.06.2025;Knjizara Vulkan;1200;0;35850;RSD
+17.06.2025;Yandex eda;1400;0;34450;RSD
+19.06.2025;Lidl;4200;0;30250;RSD
+21.06.2025;NIS Petrol;3800;0;26450;RSD
+24.06.2025;Netflix;1200;0;25250;RSD
+27.06.2025;Maxi;3600;0;21650;RSD`);
+        }} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,borderRadius:8,padding:"9px 20px",fontSize:13,cursor:"pointer",textAlign:"center"}}>
+          📊 Загрузить демо-данные (Raiffeisen Serbia)
+        </button>
+      </div>}
+
+      {/* ── OVERVIEW ── */}
+      {tab==="overview"&&transactions.length>0&&<div style={{display:"flex",flexDirection:"column",gap:16}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
+          {[
+            {label:"Доходы",value:income,color:C.green,bg:C.greenSoft,pre:"+"},
+            {label:"Расходы",value:expense,color:C.red,bg:C.redSoft,pre:"-"},
+            {label:"Баланс",value:balance,color:balance>=0?C.green:C.red,bg:balance>=0?C.greenSoft:C.redSoft,pre:balance>=0?"+":""},
+          ].map(k=>(
+            <div key={k.label} style={{background:k.bg,border:`1px solid ${k.color}33`,borderRadius:12,padding:14}}>
+              <div style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{k.label}</div>
+              <div style={{fontSize:16,fontWeight:700,color:k.color}}>{k.pre}{fmt(Math.abs(k.value))}</div>
+            </div>
+          ))}
+        </div>
+
+        {catData.length>0&&<div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
+          <div style={{fontSize:13,fontWeight:600,marginBottom:14}}>Расходы по категориям</div>
+          <BarChart data={catData.slice(0,10)}/>
+        </div>}
+
+        <div style={{background:C.accentSoft,borderRadius:12,padding:14,border:`1px solid ${C.accent}33`,display:"flex",gap:10,alignItems:"flex-start"}}>
+          <span style={{fontSize:20}}>💡</span>
+          <div>
+            <div style={{fontSize:13,fontWeight:600,color:C.accent,marginBottom:4}}>Правило 50/30/20</div>
+            <div style={{fontSize:12,color:C.muted,lineHeight:1.5}}>
+              Нужды: <b style={{color:C.text}}>{fmt(income*0.5)}</b> · Желания: <b style={{color:C.text}}>{fmt(income*0.3)}</b> · Сбережения: <b style={{color:C.green}}>{fmt(income*0.2)}</b>
+            </div>
+          </div>
+        </div>
+
+        <div style={{background:C.card,borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
+          <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{fontSize:13,fontWeight:600}}>Операции</div>
+            <div style={{display:"flex",gap:6}}>
+              {[["all","Все"],["expense","Расходы"],["income","Доходы"]].map(([v,l])=>(
+                <button key={v} onClick={()=>setTxFilter(v)}
+                  style={{background:txFilter===v?C.accent:"none",border:`1px solid ${txFilter===v?C.accent:C.border}`,color:txFilter===v?"#fff":C.muted,fontSize:11,padding:"3px 10px",borderRadius:20,cursor:"pointer"}}>{l}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{maxHeight:320,overflowY:"auto"}}>
+            {filtered.slice(0,100).map(t=><TxRow key={t.id} t={t}/>)}
+          </div>
+        </div>
+
+        <button onClick={()=>setTab("chat")}
+          style={{background:`linear-gradient(135deg,${C.accent},#8B5CF6)`,color:"#fff",border:"none",borderRadius:10,padding:"12px 20px",fontSize:14,fontWeight:600,cursor:"pointer",textAlign:"center"}}>
+          💬 Обсудить с ИИ-помощником →
+        </button>
+      </div>}
+
+      {/* ── MORTGAGE ── */}
+      {tab==="mortgage"&&<div style={{display:"flex",flexDirection:"column",gap:16}}>
+        <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:600}}>🏦 Ипотечный калькулятор</div>
+            <div style={{fontSize:12,color:C.muted,marginTop:2}}>Прогноз погашения с досрочными платежами</div>
+          </div>
+          <button onClick={()=>setMortgage(m=>({...m,enabled:!m.enabled}))}
+            style={{background:mortgage.enabled?C.green:C.dimmed,border:"none",borderRadius:20,padding:"6px 16px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+            {mortgage.enabled?"Включено":"Выключено"}
+          </button>
+        </div>
+        {mortgage.enabled
+          ? <MortgagePanel mortgage={mortgage} setMortgage={setMortgage}/>
+          : <div style={{textAlign:"center",padding:"40px 20px",color:C.muted,fontSize:14}}>
+              Включи ипотечный калькулятор кнопкой выше, затем введи параметры кредита
+            </div>
+        }
+      </div>}
+
+      {/* ── CHAT ── */}
+      {tab==="chat"&&<div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 180px)"}}>
+        {messages.length<=1&&<div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
+          {["Где я трачу больше всего?","Сколько могу откладывать?","Прогноз на следующий месяц","Стратегия накоплений","Когда погашу ипотеку?","Выгодно ли досрочное погашение?"].map(q=>(
+            <button key={q} onClick={()=>setChatInput(q)}
+              style={{background:C.card,border:`1px solid ${C.border}`,color:C.muted,fontSize:12,padding:"6px 12px",borderRadius:20,cursor:"pointer"}}>{q}</button>
+          ))}
+        </div>}
+        <div style={{flex:1,overflowY:"auto",paddingRight:4}}>
+          {messages.map((m,i)=><Message key={i} msg={m}/>)}
+          {loading&&<div style={{display:"flex",alignItems:"center",gap:8,color:C.muted,fontSize:13,marginBottom:12}}>
+            <div style={{width:28,height:28,borderRadius:"50%",background:C.accentSoft,border:`1.5px solid ${C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}}>💡</div>
+            <div style={{display:"flex",gap:4}}>
+              {[0,1,2].map(i=><div key={i} style={{width:6,height:6,borderRadius:"50%",background:C.accent,animation:`pulse 1.2s ease-in-out ${i*0.2}s infinite`}}/>)}
+            </div>
+          </div>}
+          <div ref={chatEndRef}/>
+        </div>
+        <div style={{display:"flex",gap:10,marginTop:12,padding:"12px 0"}}>
+          <input value={chatInput} onChange={e=>setChatInput(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();}}}
+            placeholder="Спроси о бюджете или ипотеке..."
+            style={{flex:1,background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"11px 16px",color:C.text,fontSize:14,outline:"none"}}/>
+          <button onClick={sendMessage} disabled={loading||!chatInput.trim()}
+            style={{background:loading||!chatInput.trim()?C.dimmed:C.accent,color:"#fff",border:"none",borderRadius:12,width:44,height:44,fontSize:18,cursor:loading?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+            →
+          </button>
+        </div>
+      </div>}
+    </div>
+    <style>{`
+      @keyframes pulse{0%,100%{opacity:0.3;transform:scale(0.8);}50%{opacity:1;transform:scale(1);}}
+      *{box-sizing:border-box;}
+      ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:${C.border};border-radius:2px;}
+      textarea:focus,input:focus{border-color:${C.accent}!important;}
+      button:hover:not(:disabled){opacity:0.88;}
+      select{appearance:none;}
+    `}</style>
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+  </script>
+</body>
+</html>
