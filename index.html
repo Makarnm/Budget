@@ -18,7 +18,6 @@
   <script type="text/babel">
 const { useState, useRef, useCallback, useEffect } = React;
 
-// ─── Palette ────────────────────────────────────────────────────────────────
 const C = {
   bg:"#0F1117",surface:"#181C27",card:"#1E2336",border:"#262D42",
   accent:"#5B8AF5",accentSoft:"#1C2D52",green:"#3ECFA0",greenSoft:"#0F2E25",
@@ -26,21 +25,20 @@ const C = {
   text:"#E8EAEE",muted:"#7B84A0",dimmed:"#3D4460",purple:"#A78BFA",purpleSoft:"#2D1F52",
 };
 
-// ─── Category map (Raiffeisen Serbia + RSD/EUR aware) ───────────────────────
 const CATEGORIES = {
-  "🍽️ Hrana"    :["maxi","lidl","idea","dis","delhaize","pekara","restoran","fast food","mcdonalds","kfc","pizza","kafic","kafana","supermarket","grocery","market","shop"],
-  "🚗 Prevoz"   :["taxi","car go","yandex","bolt","uber","gorivo","benzin","petrol","parking","nis petrol","beopetrol","bus","tram","beograd na vodi","metro"],
-  "🏠 Stambeni" :["kirija","stanarina","rent","komunal","struja","edb","water","voda","gas","srbijagas","infostan","skupstina","upravnik","zgrada"],
-  "🏦 Hipoteka" :["hipoteka","kredit","loan","mortgage","annuitet","anuitet","otplata","raiffeisen kredit","stambeni kredit"],
-  "💊 Zdravlje" :["apoteka","pharmacy","klinika","doktor","bolnica","dental","stomatolog","analiza","lab","dragic","benu"],
-  "🎬 Zabava"   :["netflix","spotify","hbo","apple","steam","igra","game","bioskop","pozoriste","koncert","youtube"],
-  "🛍️ Kupovina":["zara","h&m","primark","reserved","lcwaikiki","ozon","wildberries","sport","mango","fashion","obuca","odeca"],
-  "📱 Telefon"  :["telekom","yettel","a1","mts","internet","vip","telenor","mobilni"],
+  "🍽️ Hrana"    :["maxi","lidl","idea","dis","delhaize","pekara","restoran","fast food","mcdonalds","kfc","pizza","kafic","kafana","supermarket","grocery","market","shop","konzum","mercator","roda","tempo","univerexport","aman","spar"],
+  "🚗 Prevoz"   :["taxi","car go","yandex","bolt","uber","gorivo","benzin","petrol","parking","nis petrol","beopetrol","bus","tram","metro","oktan","lukoil","gazprom","emo"],
+  "🏠 Stambeni" :["kirija","stanarina","rent","komunal","struja","edb","water","voda","gas","srbijagas","infostan","skupstina","upravnik","zgrada","city facility","stamben"],
+  "🏦 Hipoteka" :["hipoteka","kredit","loan","mortgage","annuitet","anuitet","otplata","stambeni kredit","raiffeisen kredit"],
+  "💊 Zdravlje" :["apoteka","pharmacy","klinika","doktor","bolnica","dental","stomatolog","analiza","lab","dragic","benu","lilly","phoenix"],
+  "🎬 Zabava"   :["netflix","spotify","hbo","apple","steam","igra","game","bioskop","pozoriste","koncert","youtube","cinema","cineplexx"],
+  "🛍️ Kupovina":["zara","h&m","primark","reserved","lcwaikiki","ozon","wildberries","sport","mango","fashion","obuca","odeca","alta group","emmezeta","jysk","ikea"],
+  "📱 Telefon"  :["telekom","yettel","a1","mts","internet","vip","telenor","mobilni","sbb","telekomunik"],
   "✈️ Putovanje":["air serbia","wizair","ryanair","hotel","booking","airbnb","hostel","voz","zeleznica","bus karta"],
-  "📚 Obrazovanje":["kurs","knjiga","skola","faculty","udemy","coursera","lingua","engleski"],
-  "💰 Prenos"   :["prenos","transfer","uplata","povracaj","refund","sbp","menjacnica","exchange"],
+  "📚 Obrazovanje":["kurs","knjiga","skola","faculty","udemy","coursera","lingua","engleski","abc step"],
+  "💰 Prenos"   :["prenos","transfer","uplata","povracaj","refund","sbp","menjacnica","exchange","eps ips","ipp","epp"],
   "💼 Prihod"   :["plata","salary","zarada","honorar","freelance","naknada","dividenda","income","isplata"],
-  "🏧 Banka"    :["provizija","naknada","fee","commission","kamate","interest","raiffeisen"],
+  "🏧 Banka"    :["provizija","naknada za","fee","commission","kamate","interest","osiguranje","paket"],
   "🔧 Ostalo"   :[],
 };
 
@@ -52,71 +50,125 @@ function categorize(desc) {
   return "🔧 Ostalo";
 }
 
-// ─── Raiffeisen Serbia CSV parser ────────────────────────────────────────────
-// Format: "DD.MM.YYYY";"Description";"Debit";"Credit";"Balance";"Currency"
-// Also handles simpler: date;desc;amount
-function parseRaiffeisen(text) {
-  const lines = text.trim().split(/\r?\n/).filter(l=>l.trim());
+// ─── Parse number: handles both 1.234,56 and 1,234.56 ───────────────────────
+function parseNum(s) {
+  if (!s) return 0;
+  s = s.trim();
+  // Serbian format: 1.234,56
+  if (/\d+\.\d{3},\d{2}/.test(s) || /\d+,\d{2}$/.test(s)) {
+    return parseFloat(s.replace(/\./g,"").replace(",",".")) || 0;
+  }
+  // Standard: 1,234.56
+  return parseFloat(s.replace(/,/g,"")) || 0;
+}
+
+// ─── Parse Raiffeisen Serbia PDF text ────────────────────────────────────────
+// Columns: Datum prijema | Datum izvršenja | Broj kartice | Opis promene | Iznos ref | Iznos orig | Isplata | Uplata | Stanje
+function parseRaiffeisenPDF(text) {
+  const lines = text.split(/\n/).map(l=>l.trim()).filter(Boolean);
   const txs = [];
-  for (const line of lines) {
-    // Split by ; or , or tab, strip quotes
-    const parts = line.split(/[;,\t]/).map(s=>s.trim().replace(/^["']|["']$/g,""));
-    if (parts.length < 2) continue;
+  const dateRe = /^\d{2}\.\d{2}\.\d{4}$/;
+  const numRe  = /^[\d.,]+$/;
 
-    let date=null, desc="", amount=0, currency="RSD";
+  let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    // Look for line starting with a date
+    if (!dateRe.test(l)) { i++; continue; }
 
-    // Detect date in any part
-    for (const p of parts) {
-      if (!date && /^\d{1,2}\.\d{1,2}\.\d{4}$/.test(p)) { date=p; }
-      else if (!date && /^\d{4}-\d{2}-\d{2}/.test(p)) { date=p.slice(0,10).split("-").reverse().join("."); }
-      else if (!date && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(p)) {
-        const [m,d,y]=p.split("/"); date=`${d.padStart(2,"0")}.${m.padStart(2,"0")}.${y}`;
-      }
+    const date1 = l; // Datum prijema
+    let date2 = "", cardNum = "", descParts = [], isplata = 0, uplata = 0;
+
+    i++;
+    // Next line: date2 (optional)
+    if (i < lines.length && dateRe.test(lines[i])) { date2 = lines[i]; i++; }
+
+    // Next: card number (3-4 digit) or skip
+    if (i < lines.length && /^\d{3,5}$/.test(lines[i])) { cardNum = lines[i]; i++; }
+
+    // Collect description lines until we hit numbers
+    while (i < lines.length) {
+      const cur = lines[i];
+      // Stop if we see a standalone number (amount columns)
+      if (/^[\d.,]+$/.test(cur) && cur.length < 15) break;
+      // Stop if next line looks like a date (new transaction)
+      if (dateRe.test(cur)) break;
+      // Skip header rows
+      if (/^(Datum|Broj|Opis|Iznos|Isplata|Uplata|Stanje)/i.test(cur)) { i++; continue; }
+      descParts.push(cur);
+      i++;
     }
 
-    // Raiffeisen 6-col format: date;desc;debit;credit;balance;currency
-    if (parts.length >= 4) {
-      desc = parts.find((p,i)=>i>0 && p.length>2 && !/^[\d.,\-\s]+$/.test(p) && !/^\d{1,2}[.\/]\d{1,2}[.\/]\d{4}$/.test(p)) || "";
-      // debit (col 2 if numeric) and credit (col 3)
-      const nums = parts.map(p=>{
-        const n=parseFloat(p.replace(/\s/g,"").replace(",","."));
-        return isNaN(n)?null:n;
-      });
-      // currency from last meaningful column
-      const cur = parts.find(p=>/^(RSD|EUR|USD|CHF|GBP)$/i.test(p));
-      if (cur) currency = cur.toUpperCase();
-
-      // Find debit / credit columns (non-zero)
-      const numericCols = nums.map((v,i)=>({v,i})).filter(x=>x.v!==null&&x.v!==0);
-      if (numericCols.length >= 2) {
-        const debit  = numericCols.find(x=>x.i===2)?.v || 0;
-        const credit = numericCols.find(x=>x.i===3)?.v || 0;
-        if (debit > 0)  amount = -debit;
-        else if (credit > 0) amount = credit;
-      } else if (numericCols.length === 1) {
-        amount = numericCols[0].v;
-      }
-    } else {
-      // Simple 3-col
-      desc = parts.find(p=>p.length>2 && !/^[\d.,\-\s]+$/.test(p)&&!/^\d{1,2}[.\/]\d{1,2}[.\/]\d{4}$/.test(p)) || parts[1]||"";
-      const numParts = parts.filter(p=>/^-?[\d\s.,]+$/.test(p.replace(/\s/g,"")));
-      if (numParts.length) amount = parseFloat(numParts[numParts.length-1].replace(/\s/g,"").replace(",","."));
+    // Collect up to 6 numeric columns: iznos_ref, iznos_ref2(?), iznos_orig, iznos_orig2(?), isplata, uplata, stanje
+    const nums = [];
+    while (i < lines.length && nums.length < 7) {
+      const cur = lines[i];
+      if (/^[\d.,]+$/.test(cur)) { nums.push(parseNum(cur)); i++; }
+      else if (/^[\d.,]+ [A-Z]+$/.test(cur)) { nums.push(parseNum(cur.split(" ")[0])); i++; } // "40.00 RSD"
+      else if (/^Kurs:$/.test(cur)) { i++; } // skip
+      else break;
     }
 
-    if (desc && amount !== 0) {
-      txs.push({
-        id: Math.random().toString(36).slice(2),
-        date: date || new Date().toLocaleDateString("sr-RS"),
-        description: desc, amount, currency,
-        category: categorize(desc),
-        type: amount < 0 ? "expense" : "income",
-      });
+    const desc = descParts.join(" ").trim();
+    if (!desc) continue;
+
+    // In Raiffeisen PDF: columns are iznos_ref_val, iznos_orig_val, Isplata, Uplata, Stanje
+    // nums[0]=iznos_ref, nums[1]=iznos_orig OR isplata depending on structure
+    // Most reliable: second-to-last is Isplata, third-to-last is Uplata (before Stanje)
+    // Actually from PDF: ... | Isplata | Uplata | Stanje  → last 3 nums
+    if (nums.length >= 3) {
+      isplata = nums[nums.length - 3];
+      uplata  = nums[nums.length - 2];
+      // stanje = nums[nums.length - 1]; // balance, not needed
+    } else if (nums.length === 2) {
+      isplata = nums[0]; uplata = nums[1];
+    } else if (nums.length === 1) {
+      isplata = nums[0];
     }
+
+    const amount = uplata > 0 ? uplata : -isplata;
+    if (amount === 0) continue;
+
+    txs.push({
+      id: Math.random().toString(36).slice(2),
+      date: date1,
+      description: desc,
+      amount,
+      currency: "RSD",
+      category: categorize(desc),
+      type: amount < 0 ? "expense" : "income",
+    });
   }
   return txs;
 }
 
-// ─── Build AI context ────────────────────────────────────────────────────────
+// ─── Parse simple CSV (fallback) ─────────────────────────────────────────────
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/).filter(l=>l.trim());
+  const txs = [];
+  for (const line of lines) {
+    const parts = line.split(/[;,\t]/).map(s=>s.trim().replace(/^["']|["']$/g,""));
+    if (parts.length < 3) continue;
+    let date=null, desc="", amount=0, currency="RSD";
+    for (const p of parts) {
+      if (!date && /^\d{1,2}\.\d{1,2}\.\d{4}$/.test(p)) date=p;
+      else if (!date && /^\d{4}-\d{2}-\d{2}/.test(p)) { date=p.slice(0,10).split("-").reverse().join("."); }
+    }
+    desc = parts.find((p,i)=>i>0&&p.length>2&&!/^[\d.,\s\-]+$/.test(p)&&!/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(p)) || "";
+    const cur = parts.find(p=>/^(RSD|EUR|USD|CHF)$/i.test(p));
+    if (cur) currency=cur.toUpperCase();
+    const numericCols = parts.map(p=>parseNum(p)).filter(v=>v!==0);
+    if (parts.length >= 4) {
+      const debit = parseNum(parts[parts.length-4]||"0");
+      const credit = parseNum(parts[parts.length-3]||"0");
+      if (debit>0) amount=-debit; else if (credit>0) amount=credit;
+    }
+    if (!amount && numericCols.length) amount=numericCols[numericCols.length-1];
+    if (desc && amount!==0) txs.push({id:Math.random().toString(36).slice(2),date:date||"",description:desc,amount,currency,category:categorize(desc),type:amount<0?"expense":"income"});
+  }
+  return txs;
+}
+
 function buildContext(transactions, mortgage) {
   let ctx = "";
   if (transactions.length) {
@@ -124,58 +176,43 @@ function buildContext(transactions, mortgage) {
     let totalIn=0, totalEx=0;
     for (const t of transactions) {
       byCat[t.category]=(byCat[t.category]||0)+t.amount;
-      const m=t.date.slice(0,7).split(".").reverse().slice(1).join("-") || t.date.slice(0,7);
+      const parts=t.date.split(".");
+      const m=parts.length===3?`${parts[2]}-${parts[1]}`:(t.date.slice(0,7));
       if (!byMonth[m]) byMonth[m]={income:0,expense:0};
-      if (t.type==="income"){byMonth[m].income+=t.amount;totalIn+=t.amount;}
-      else {byMonth[m].expense+=Math.abs(t.amount);totalEx+=Math.abs(t.amount);}
+      if(t.type==="income"){byMonth[m].income+=t.amount;totalIn+=t.amount;}
+      else{byMonth[m].expense+=Math.abs(t.amount);totalEx+=Math.abs(t.amount);}
     }
-    ctx += `FINANSIJSKI PODACI (${transactions.length} transakcija):\nUkupan prihod: ${totalIn.toFixed(0)}\nUkupni rashodi: ${totalEx.toFixed(0)}\nBilans: ${(totalIn-totalEx).toFixed(0)}\n\n`;
-    ctx += "PO KATEGORIJAMA:\n"+Object.entries(byCat).sort((a,b)=>a[1]-b[1]).map(([c,v])=>`${c}: ${v.toFixed(0)}`).join("\n")+"\n\n";
-    ctx += "PO MESECIMA:\n"+Object.entries(byMonth).sort().map(([m,v])=>`${m}: prihod ${v.income.toFixed(0)}, rashod ${v.expense.toFixed(0)}`).join("\n")+"\n\n";
-  } else {
-    ctx += "Podaci o transakcijama nisu učitani.\n\n";
-  }
+    ctx+=`FINANSIJSKI PODACI (${transactions.length} transakcija):\nUkupan prihod: ${totalIn.toFixed(0)}\nUkupni rashodi: ${totalEx.toFixed(0)}\nBilans: ${(totalIn-totalEx).toFixed(0)}\n\n`;
+    ctx+="PO KATEGORIJAMA:\n"+Object.entries(byCat).sort((a,b)=>a[1]-b[1]).map(([c,v])=>`${c}: ${v.toFixed(0)}`).join("\n")+"\n\n";
+    ctx+="PO MESECIMA:\n"+Object.entries(byMonth).sort().map(([m,v])=>`${m}: prihod ${v.income.toFixed(0)}, rashod ${v.expense.toFixed(0)}`).join("\n")+"\n\n";
+  } else { ctx+="Podaci o transakcijama nisu učitani.\n\n"; }
   if (mortgage.enabled) {
-    const bal = mortgage.balance, rate = mortgage.rate/100/12, pmt = mortgage.payment;
-    let months=0, bal2=bal, totalInterest=0;
-    while (bal2>0 && months<600) {
-      const int=bal2*rate; const prin=pmt-int;
-      if (prin<=0) break;
-      totalInterest+=int; bal2-=prin; months++;
-    }
-    const extraMonths = mortgage.extraMonthly>0 ? (() => {
-      let b=bal,m=0;
-      while(b>0&&m<600){const i=b*rate;const p=(pmt+mortgage.extraMonthly)-i;if(p<=0)break;b-=p;m++;}
-      return m;
-    })() : null;
-    ctx += `HIPOTEKA:\nOstatak duga: ${bal.toLocaleString()} ${mortgage.currency}\nKamatna stopa: ${mortgage.rate}% godišnje\nMesečna rata: ${pmt.toLocaleString()} ${mortgage.currency}\nDo otplate (bez prevremenih): ~${months} meseci (${(months/12).toFixed(1)} godina)\nUkupna kamata: ~${totalInterest.toFixed(0)} ${mortgage.currency}\n`;
-    if (extraMonths!==null) ctx += `Sa dodatnim ${mortgage.extraMonthly}/mes: ~${extraMonths} meseci — ušteda ${months-extraMonths} meseci\n`;
-    if (mortgage.notes) ctx += `Beleška: ${mortgage.notes}\n`;
+    const bal=mortgage.balance,rate=mortgage.rate/100/12,pmt=mortgage.payment;
+    let months=0,bal2=bal,totalInt=0;
+    while(bal2>0&&months<600){const int=bal2*rate;const prin=pmt-int;if(prin<=0)break;totalInt+=int;bal2-=prin;months++;}
+    ctx+=`HIPOTEKA:\nOstatak: ${bal.toLocaleString()} ${mortgage.currency}\nStopa: ${mortgage.rate}%\nRata: ${pmt.toLocaleString()} ${mortgage.currency}\nDo otplate: ~${months} meseci\nUkupna kamata: ~${totalInt.toFixed(0)} ${mortgage.currency}\n`;
   }
   return ctx;
 }
 
-// ─── Mortgage calculator logic ───────────────────────────────────────────────
-function calcSchedule(balance, annualRate, payment, extraMonthly=0, extraOneTime=0) {
-  const rate = annualRate/100/12;
-  const rows = [];
-  let bal = balance - extraOneTime;
-  let month = 0;
-  while (bal > 0.01 && month < 600) {
+function calcSchedule(balance,annualRate,payment,extraMonthly=0,extraOneTime=0) {
+  const rate=annualRate/100/12;
+  const rows=[];
+  let bal=balance-extraOneTime;
+  let month=0;
+  while(bal>0.01&&month<600){
     month++;
-    const interest = bal * rate;
-    const principal = (payment + extraMonthly) - interest;
-    if (principal <= 0) break;
-    bal = Math.max(0, bal - principal);
-    rows.push({ month, interest: +interest.toFixed(2), principal: +principal.toFixed(2), balance: +bal.toFixed(2) });
-    if (bal < 0.01) break;
+    const interest=bal*rate;
+    const principal=(payment+extraMonthly)-interest;
+    if(principal<=0)break;
+    bal=Math.max(0,bal-principal);
+    rows.push({month,interest:+interest.toFixed(2),principal:+principal.toFixed(2),balance:+bal.toFixed(2)});
+    if(bal<0.01)break;
   }
   return rows;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 const CAT_COLORS=["#5B8AF5","#3ECFA0","#F5B942","#F26B5E","#A78BFA","#34D399","#FB923C","#60A5FA","#F472B6","#4ADE80","#FACC15","#E879F9"];
-
 function fmt(n,dec=0){return Number(n).toLocaleString("sr-RS",{maximumFractionDigits:dec});}
 
 function BarChart({data}){
@@ -228,34 +265,24 @@ function Field({label,value,onChange,type="number",placeholder="",suffix="",styl
   </div>;
 }
 
-// ─── Mortgage Panel ───────────────────────────────────────────────────────────
 function MortgagePanel({mortgage,setMortgage}){
   const [extraOne,setExtraOne]=useState(0);
-  const schedule = calcSchedule(mortgage.balance, mortgage.rate, mortgage.payment, mortgage.extraMonthly, extraOne);
-  const scheduleBase = calcSchedule(mortgage.balance, mortgage.rate, mortgage.payment, 0, 0);
-  const totalInt = schedule.reduce((s,r)=>s+r.interest,0);
-  const totalIntBase = scheduleBase.reduce((s,r)=>s+r.interest,0);
-  const savedMonths = scheduleBase.length - schedule.length;
-  const savedInterest = totalIntBase - totalInt;
-  const payoffDate = (() => {
-    const d=new Date(); d.setMonth(d.getMonth()+schedule.length); 
-    return d.toLocaleDateString("sr-RS",{month:"long",year:"numeric"});
-  })();
-
-  // Mini chart: balance over time (every 12 months)
-  const chartPoints = [];
-  for (let i=0;i<schedule.length;i+=Math.max(1,Math.floor(schedule.length/24))) {
-    chartPoints.push({x:i,y:schedule[i].balance});
-  }
+  const schedule=calcSchedule(mortgage.balance,mortgage.rate,mortgage.payment,mortgage.extraMonthly,extraOne);
+  const scheduleBase=calcSchedule(mortgage.balance,mortgage.rate,mortgage.payment,0,0);
+  const totalInt=schedule.reduce((s,r)=>s+r.interest,0);
+  const totalIntBase=scheduleBase.reduce((s,r)=>s+r.interest,0);
+  const savedMonths=scheduleBase.length-schedule.length;
+  const savedInterest=totalIntBase-totalInt;
+  const payoffDate=(()=>{const d=new Date();d.setMonth(d.getMonth()+schedule.length);return d.toLocaleDateString("sr-RS",{month:"long",year:"numeric"});})();
+  const chartPoints=[];
+  for(let i=0;i<schedule.length;i+=Math.max(1,Math.floor(schedule.length/24)))chartPoints.push({x:i,y:schedule[i].balance});
   chartPoints.push({x:schedule.length,y:0});
-  const maxBal = mortgage.balance;
-  const chartW=280, chartH=80;
-  const pts = chartPoints.map(p=>`${(p.x/schedule.length)*chartW},${chartH-(p.y/maxBal)*chartH}`).join(" ");
+  const chartW=280,chartH=80;
+  const pts=chartPoints.map(p=>`${(p.x/schedule.length)*chartW},${chartH-(p.y/mortgage.balance)*chartH}`).join(" ");
 
   return <div style={{display:"flex",flexDirection:"column",gap:16}}>
-    {/* Inputs */}
     <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
-      <div style={{fontSize:13,fontWeight:600,marginBottom:14,color:C.text}}>⚙️ Параметры ипотеки</div>
+      <div style={{fontSize:13,fontWeight:600,marginBottom:14}}>⚙️ Параметры ипотеки</div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Field label="Остаток долга" value={mortgage.balance} onChange={e=>setMortgage(m=>({...m,balance:+e.target.value}))} suffix={mortgage.currency}/>
         <Field label="Ставка в год" value={mortgage.rate} onChange={e=>setMortgage(m=>({...m,rate:+e.target.value}))} suffix="%"/>
@@ -271,11 +298,9 @@ function MortgagePanel({mortgage,setMortgage}){
         <Field label="Разовый доп. платёж" value={extraOne} onChange={e=>setExtraOne(+e.target.value)} suffix={mortgage.currency}/>
       </div>
       <div style={{marginTop:12}}>
-        <Field label="Заметки (банк, условия...)" value={mortgage.notes} onChange={e=>setMortgage(m=>({...m,notes:e.target.value}))} type="text" placeholder="Raiffeisen, переменная ставка..."/>
+        <Field label="Заметки" value={mortgage.notes} onChange={e=>setMortgage(m=>({...m,notes:e.target.value}))} type="text" placeholder="Raiffeisen, условия..."/>
       </div>
     </div>
-
-    {/* KPIs */}
     <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:12}}>
       {[
         {label:"Срок погашения",value:payoffDate,color:C.accent},
@@ -289,17 +314,10 @@ function MortgagePanel({mortgage,setMortgage}){
         </div>
       ))}
     </div>
-
-    {/* Balance curve */}
     <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
       <div style={{fontSize:13,fontWeight:600,marginBottom:12}}>📉 График остатка долга</div>
       <svg width="100%" viewBox={`0 0 ${chartW} ${chartH+10}`} style={{overflow:"visible"}}>
-        <defs>
-          <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={C.accent} stopOpacity="0.3"/>
-            <stop offset="100%" stopColor={C.accent} stopOpacity="0"/>
-          </linearGradient>
-        </defs>
+        <defs><linearGradient id="grad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.accent} stopOpacity="0.3"/><stop offset="100%" stopColor={C.accent} stopOpacity="0"/></linearGradient></defs>
         <polygon points={`0,${chartH} ${pts} ${chartW},${chartH}`} fill="url(#grad)"/>
         <polyline points={pts} fill="none" stroke={C.accent} strokeWidth="2"/>
       </svg>
@@ -308,19 +326,11 @@ function MortgagePanel({mortgage,setMortgage}){
         <span>→ {payoffDate}</span>
       </div>
     </div>
-
-    {/* Amortisation table (first 24 rows) */}
     <div style={{background:C.card,borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
       <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:600}}>График платежей (первые 24 мес.)</div>
       <div style={{overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-          <thead>
-            <tr style={{background:C.bg}}>
-              {["Мес.","Платёж","% часть","Осн. часть","Остаток"].map(h=>(
-                <th key={h} style={{padding:"8px 12px",color:C.muted,textAlign:"right",fontWeight:500,whiteSpace:"nowrap"}}>{h}</th>
-              ))}
-            </tr>
-          </thead>
+          <thead><tr style={{background:C.bg}}>{["Мес.","Платёж","% часть","Осн. часть","Остаток"].map(h=><th key={h} style={{padding:"8px 12px",color:C.muted,textAlign:"right",fontWeight:500,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
           <tbody>
             {schedule.slice(0,24).map((r,i)=>(
               <tr key={r.month} style={{borderTop:`1px solid ${C.border}`,background:i%2===0?"transparent":C.surface}}>
@@ -334,7 +344,7 @@ function MortgagePanel({mortgage,setMortgage}){
           </tbody>
         </table>
       </div>
-      {schedule.length>24&&<div style={{padding:"10px 16px",fontSize:12,color:C.muted,borderTop:`1px solid ${C.border}`}}>... ещё {schedule.length-24} платежей до полного погашения</div>}
+      {schedule.length>24&&<div style={{padding:"10px 16px",fontSize:12,color:C.muted,borderTop:`1px solid ${C.border}`}}>... ещё {schedule.length-24} платежей</div>}
     </div>
   </div>;
 }
@@ -343,29 +353,91 @@ function MortgagePanel({mortgage,setMortgage}){
 function App() {
   const [tab,setTab]=useState("upload");
   const [transactions,setTransactions]=useState([]);
-  const [messages,setMessages]=useState([{role:"assistant",content:"Zdravo! Ja sam tvoj finansijski asistent 👋\n\nUčitaj izvod Raiffeisen banke Srbija (CSV) ili unesi podatke ručno. Mogu da analiziram troškove, prognouziram budžet, pomognem sa strategijom štednje i kalkulišem otplatu hipoteke sa prevremenim uplatama."}]);
+  const [messages,setMessages]=useState([{role:"assistant",content:"Zdravo! Ja sam tvoj finansijski asistent 👋\n\nUčitaj izvod Raiffeisen banke Srbija — podržani su i PDF i CSV formati. Mogu da analiziram troškove, prognouziram budžet, pomognem sa strategijom štednje i kalkulišem otplatu hipoteke."}]);
   const [chatInput,setChatInput]=useState("");
   const [loading,setLoading]=useState(false);
+  const [pdfLoading,setPdfLoading]=useState(false);
   const [pasteText,setPasteText]=useState("");
   const [txFilter,setTxFilter]=useState("all");
   const [mortgage,setMortgage]=useState({enabled:false,balance:50000,rate:4.5,payment:600,extraMonthly:0,currency:"EUR",notes:""});
+  const [parseLog,setParseLog]=useState("");
   const chatEndRef=useRef(null);
   const fileRef=useRef(null);
 
   useEffect(()=>{chatEndRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
 
-  const processText=useCallback((text)=>{
-    const parsed=parseRaiffeisen(text);
-    if(!parsed.length){alert("Nije moguće prepoznati transakcije. Proverite format fajla (CSV izvod Raiffeisen Srbija).");return;}
+  // ── Load pdf.js dynamically ───────────────────────────────────────────────
+  const loadPdfJs = useCallback(()=>new Promise((resolve,reject)=>{
+    if (window.pdfjsLib) { resolve(window.pdfjsLib); return; }
+    const s=document.createElement("script");
+    s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    s.onload=()=>{
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      resolve(window.pdfjsLib);
+    };
+    s.onerror=reject;
+    document.head.appendChild(s);
+  }),[]);
+
+  // ── Extract text from PDF ─────────────────────────────────────────────────
+  const extractPdfText = useCallback(async(file)=>{
+    const pdfjsLib = await loadPdfJs();
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+    let fullText = "";
+    for (let p=1; p<=pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      // Sort items by Y then X for proper reading order
+      const items = content.items.sort((a,b)=>{
+        const dy = Math.round(b.transform[5]) - Math.round(a.transform[5]);
+        return dy !== 0 ? dy : a.transform[4] - b.transform[4];
+      });
+      // Group by Y position (same line)
+      const lines = {};
+      for (const item of items) {
+        const y = Math.round(item.transform[5]);
+        if (!lines[y]) lines[y]=[];
+        lines[y].push(item.str);
+      }
+      const pageText = Object.keys(lines).sort((a,b)=>b-a)
+        .map(y=>lines[y].join(" "))
+        .join("\n");
+      fullText += pageText + "\n";
+    }
+    return fullText;
+  },[loadPdfJs]);
+
+  const processText = useCallback((text, isPdf=false)=>{
+    const parsed = isPdf ? parseRaiffeisenPDF(text) : parseCSV(text);
+    if (!parsed.length) {
+      setParseLog("⚠️ Nije moguće prepoznati transakcije. Pokušaj sa CSV formatom ili proveri PDF.");
+      return;
+    }
     setTransactions(prev=>[...prev,...parsed]);
+    setParseLog(`✅ Učitano ${parsed.length} transakcija`);
     setTab("overview");
   },[]);
 
-  const handleFile=useCallback((file)=>{
-    const r=new FileReader();
-    r.onload=e=>processText(e.target.result);
-    r.readAsText(file,"UTF-8");
-  },[processText]);
+  const handleFile = useCallback(async(file)=>{
+    const isPdf = file.name.toLowerCase().endsWith(".pdf");
+    if (isPdf) {
+      setPdfLoading(true);
+      setParseLog("📄 Читаю PDF...");
+      try {
+        const text = await extractPdfText(file);
+        processText(text, true);
+      } catch(e) {
+        setParseLog("⚠️ Ошибка чтения PDF: "+e.message);
+      } finally {
+        setPdfLoading(false);
+      }
+    } else {
+      const r=new FileReader();
+      r.onload=e=>processText(e.target.result,false);
+      r.readAsText(file,"UTF-8");
+    }
+  },[extractPdfText,processText]);
 
   const sendMessage=async()=>{
     if(!chatInput.trim()||loading)return;
@@ -374,35 +446,24 @@ function App() {
     setMessages(prev=>[...prev,userMsg]);
     setLoading(true);
     const ctx=buildContext(transactions,mortgage);
-    const sys=`Ti si iskusan lični finansijski savetnik i analitičar porodičnog budžeta za korisnika koji živi u Srbiji. Odgovaraj na ruskom jeziku (korisnik govori ruski).
+    const sys=`Ti si iskusan lični finansijski savetnik za korisnika koji živi u Beogradu, Srbija. Odgovaraj na ruskom jeziku.
 
-Imaš pristup sledećim finansijskim podacima korisnika:
+Finansijski podaci korisnika:
 ${ctx}
 
-Tvoje mogućnosti:
-- Analiza prihoda i rashoda po kategorijama
-- Otkrivanje anomalnih troškova
-- Prognoziranje troškova za sledeći mesec
-- Saveti za optimizaciju budžeta
-- Strategije štednje (pravilo 50/30/20, hitni fond 3-6 mes., investicije)
-- Kalkulacija otplate hipoteke sa prevremenim uplatama, analiza isplativosti
-- Odgovori na konkretna pitanja o troškovima
-
-Budi konkretan, koristi brojke iz podataka. Piši kratko i jasno, koristi emoji za preglednost. Valute su RSD i EUR (Srbija).`;
-
+Budi konkretan, koristi brojke. Piši kratko, koristi emoji. Valute: RSD i EUR.`;
     const history=messages.slice(-10).map(m=>({role:m.role,content:m.content}));
     history.push(userMsg);
     try {
       const res=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
+        method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:history}),
       });
       const data=await res.json();
       const reply=data.content?.map(b=>b.text||"").join("")||"Не удалось получить ответ.";
       setMessages(prev=>[...prev,{role:"assistant",content:reply}]);
     } catch {
-      setMessages(prev=>[...prev,{role:"assistant",content:"⚠️ Ошибка API. Проверь подключение."}]);
+      setMessages(prev=>[...prev,{role:"assistant",content:"⚠️ Ошибка API."}]);
     } finally { setLoading(false); }
   };
 
@@ -422,108 +483,91 @@ Budi konkretan, koristi brojke iz podataka. Piši kratko i jasno, koristi emoji 
   ];
 
   return <div style={{background:C.bg,minHeight:"100vh",fontFamily:"'Inter','SF Pro Display',system-ui,sans-serif",color:C.text}}>
-    {/* Header */}
     <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <div style={{width:32,height:32,borderRadius:8,background:`linear-gradient(135deg,${C.accent},#8B5CF6)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>💎</div>
         <div>
           <div style={{fontSize:15,fontWeight:700,letterSpacing:-0.3}}>Family Budget AI</div>
-          <div style={{fontSize:10,color:C.muted,letterSpacing:0.5,textTransform:"uppercase"}}>Raiffeisen Serbia · RSD / EUR</div>
+          <div style={{fontSize:10,color:C.muted,letterSpacing:0.5,textTransform:"uppercase"}}>Raiffeisen Serbia · PDF & CSV</div>
         </div>
       </div>
       {transactions.length>0&&<div style={{display:"flex",gap:6,alignItems:"center"}}>
         <div style={{background:C.greenSoft,color:C.green,fontSize:11,padding:"3px 8px",borderRadius:20,border:`1px solid ${C.green}33`}}>{transactions.length} operacija</div>
-        <button onClick={()=>{setTransactions([]);setTab("upload");}} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:11,padding:"3px 8px",borderRadius:20,cursor:"pointer"}}>Očisti</button>
+        <button onClick={()=>{setTransactions([]);setTab("upload");setParseLog("");}} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:11,padding:"3px 8px",borderRadius:20,cursor:"pointer"}}>Očisti</button>
       </div>}
     </div>
 
-    {/* Tabs */}
     <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,display:"flex",padding:"0 20px",overflowX:"auto"}}>
       {TABS.map(t=>(
         <button key={t.id} onClick={()=>!t.disabled&&setTab(t.id)}
           style={{background:"none",border:"none",padding:"12px 16px",cursor:t.disabled?"default":"pointer",
             color:tab===t.id?C.accent:t.disabled?C.dimmed:C.muted,fontSize:13,fontWeight:tab===t.id?600:400,
             borderBottom:tab===t.id?`2px solid ${C.accent}`:"2px solid transparent",marginBottom:-1,transition:"color 0.2s",whiteSpace:"nowrap"}}>
-          {t.label}{t.id==="mortgage"&&mortgage.enabled?" 🏦":""}
+          {t.label}
         </button>
       ))}
     </div>
 
     <div style={{maxWidth:800,margin:"0 auto",padding:"20px 16px"}}>
 
-      {/* ── UPLOAD ── */}
       {tab==="upload"&&<div style={{display:"flex",flexDirection:"column",gap:16}}>
-        <div onClick={()=>fileRef.current?.click()}
-          style={{border:`2px dashed ${C.border}`,borderRadius:16,padding:"40px 24px",textAlign:"center",background:C.card,cursor:"pointer"}}>
-          <input ref={fileRef} type="file" accept=".csv,.txt,.xls,.xlsx" style={{display:"none"}}
-            onChange={e=>{const f=e.target.files[0];if(f)handleFile(f);}}/>
-          <div style={{fontSize:40,marginBottom:12}}>📂</div>
-          <div style={{fontSize:15,fontWeight:600,marginBottom:6}}>Загрузить выписку Raiffeisen</div>
-          <div style={{fontSize:13,color:C.muted}}>CSV / TXT — экспорт из интернет-банка raiffeisenbank.rs</div>
-        </div>
 
-        {/* Raiffeisen format guide */}
-        <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
-          <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Как получить выписку Raiffeisen Serbia</div>
-          {[
-            {step:"1",text:'Войти на raiffeisenbank.rs → «Internet bankarstvo»'},
-            {step:"2",text:'Раздел «Izvodi i transakcije» → выбрать счёт'},
-            {step:"3",text:'Выбрать период → нажать «Preuzmi» (скачать) → формат CSV'},
-            {step:"4",text:'Загрузить файл выше или вставить содержимое в поле ниже'},
-          ].map(s=>(
-            <div key={s.step} style={{display:"flex",gap:10,marginBottom:8,alignItems:"flex-start"}}>
-              <div style={{width:20,height:20,borderRadius:"50%",background:C.accentSoft,border:`1px solid ${C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:C.accent,flexShrink:0}}>{s.step}</div>
-              <div style={{fontSize:13,color:C.text,lineHeight:1.5}}>{s.text}</div>
-            </div>
-          ))}
-          <div style={{marginTop:10,padding:"10px 12px",background:C.accentSoft,borderRadius:8,fontSize:12,color:C.muted}}>
-            📌 Формат CSV: <code style={{color:C.accent}}>DD.MM.YYYY;Opis;Zaduženje;Odobrenje;Stanje;Valuta</code>
+        {/* Drop zone */}
+        <div onClick={()=>!pdfLoading&&fileRef.current?.click()}
+          style={{border:`2px dashed ${pdfLoading?C.accent:C.border}`,borderRadius:16,padding:"36px 24px",textAlign:"center",background:pdfLoading?C.accentSoft:C.card,cursor:pdfLoading?"default":"pointer",transition:"all 0.3s"}}>
+          <input ref={fileRef} type="file" accept=".pdf,.csv,.txt" style={{display:"none"}}
+            onChange={e=>{const f=e.target.files[0];if(f)handleFile(f);e.target.value="";}}/>
+          <div style={{fontSize:40,marginBottom:12}}>{pdfLoading?"⏳":"📄"}</div>
+          <div style={{fontSize:15,fontWeight:600,marginBottom:6}}>
+            {pdfLoading?"Читаю PDF...":"Загрузить выписку Raiffeisen"}
+          </div>
+          <div style={{fontSize:13,color:C.muted}}>Поддерживается PDF и CSV из интернет-банка</div>
+          <div style={{marginTop:12,display:"flex",justifyContent:"center",gap:8}}>
+            {["PDF","CSV","TXT"].map(f=>(
+              <span key={f} style={{background:C.accentSoft,color:C.accent,fontSize:11,padding:"3px 10px",borderRadius:20,border:`1px solid ${C.accent}44`}}>{f}</span>
+            ))}
           </div>
         </div>
 
+        {parseLog&&<div style={{padding:"10px 14px",borderRadius:8,background:parseLog.startsWith("✅")?C.greenSoft:C.amberSoft,border:`1px solid ${parseLog.startsWith("✅")?C.green:C.amber}44`,fontSize:13,color:parseLog.startsWith("✅")?C.green:C.amber}}>
+          {parseLog}
+        </div>}
+
+        {/* How to export */}
         <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
-          <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Или вставить данные вручную</div>
+          <div style={{fontSize:12,color:C.muted,marginBottom:12,textTransform:"uppercase",letterSpacing:0.5}}>Как скачать выписку из Raiffeisen Serbia</div>
+          {[
+            {step:"1",text:"Войти на raiffeisenbank.rs → Internet bankarstvo"},
+            {step:"2",text:"Раздел «Izvodi i transakcije» → выбрать счёт"},
+            {step:"3",text:"Выбрать период → «Preuzmi izvod» → скачать PDF"},
+            {step:"4",text:"Загрузить файл выше — PDF читается автоматически"},
+          ].map(s=>(
+            <div key={s.step} style={{display:"flex",gap:10,marginBottom:10,alignItems:"flex-start"}}>
+              <div style={{width:22,height:22,borderRadius:"50%",background:C.accentSoft,border:`1px solid ${C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:C.accent,flexShrink:0,marginTop:1}}>{s.step}</div>
+              <div style={{fontSize:13,color:C.text,lineHeight:1.5}}>{s.text}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Manual paste */}
+        <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
+          <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Или вставить CSV вручную</div>
           <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)}
-            placeholder={"01.06.2025;Maxi supermarket;1850;;98150;RSD\n05.06.2025;Car Go taksi;450;;97700;RSD\n10.06.2025;Plata;85000;;182700;RSD"}
-            style={{width:"100%",height:120,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",color:C.text,fontFamily:"monospace",fontSize:12,resize:"vertical",outline:"none",boxSizing:"border-box"}}/>
-          <button onClick={()=>{if(pasteText.trim())processText(pasteText);}}
+            placeholder={"01.06.2025;Maxi supermarket;1850;0;98150;RSD\n05.06.2025;Car Go taksi;450;0;97700;RSD\n10.06.2025;Plata;0;85000;182700;RSD"}
+            style={{width:"100%",height:100,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",color:C.text,fontFamily:"monospace",fontSize:12,resize:"vertical",outline:"none",boxSizing:"border-box"}}/>
+          <button onClick={()=>{if(pasteText.trim())processText(pasteText,false);}}
             style={{marginTop:10,background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"9px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-            Разобрать данные →
+            Разобрать →
           </button>
         </div>
 
         <button onClick={()=>{
-          processText(`01.05.2025;Plata maj;0;95000;95000;RSD
-03.05.2025;Maxi Beograd;3200;0;91800;RSD
-05.05.2025;Car Go;520;0;91280;RSD
-07.05.2025;Netflix;1200;0;90080;RSD
-08.05.2025;Apoteka Benu;2800;0;87280;RSD
-10.05.2025;Idea market;4100;0;83180;RSD
-12.05.2025;Hipoteka rata maj;72000;0;11180;RSD
-14.05.2025;A1 internet;1800;0;9380;RSD
-16.05.2025;Zara;5200;0;4180;RSD
-18.05.2025;Car Go;380;0;3800;RSD
-22.05.2025;Lidl;3100;0;700;RSD
-01.06.2025;Plata jun;0;95000;95700;RSD
-02.06.2025;Freelance honorar;0;25000;120700;RSD
-03.06.2025;Maxi Beograd;2800;0;117900;RSD
-05.06.2025;Car Go taksi;450;0;117450;RSD
-07.06.2025;Klinika Medsi;4500;0;112950;RSD
-09.06.2025;Idea market;2100;0;110850;RSD
-11.06.2025;Hipoteka rata jun;72000;0;38850;RSD
-13.06.2025;A1 mobilni;1800;0;37050;RSD
-15.06.2025;Knjizara Vulkan;1200;0;35850;RSD
-17.06.2025;Yandex eda;1400;0;34450;RSD
-19.06.2025;Lidl;4200;0;30250;RSD
-21.06.2025;NIS Petrol;3800;0;26450;RSD
-24.06.2025;Netflix;1200;0;25250;RSD
-27.06.2025;Maxi;3600;0;21650;RSD`);
+          processText(`02.05.2025\n03.05.2025\n3599\nOSIGURANJE - PAKET 1\n0.00\n40.00\n40.00\n0.00\n419943.47\n03.05.2025\n03.05.2025\nZaduzenje EPP IPS prenos na Rn Generali Serbia\n0.00\n7500.00\n7500.00\n0.00\n412443.47\n05.05.2025\n05.05.2025\nZaduzenje IPS prenos ABC STEP BY STEP\n0.00\n48600.00\n48600.00\n0.00\n363843.47\n06.05.2025\n06.05.2025\n3599\nSBB DOO SRB BEOGRAD\n4149.00\n0.00\n4149.00\n0.00\n359344.47\n07.05.2025\n07.05.2025\n3599\nALTA GROUP DOO SRB Savski venac\n4023.71\n0.00\n4023.71\n0.00\n355320.76\n09.05.2025\n12.05.2025\n3599\nA1 Srbija doo SRB NOVI BEOGRAD\n700.00\n0.00\n700.00\n0.00\n354580.76\n18.05.2025\n18.05.2025\nZaduzenje IPS City Facility doo\n0.00\n5752.61\n5752.61\n0.00\n348828.15\n01.06.2025\n01.06.2025\nPlata jun\n0.00\n95000.00\n0.00\n95000.00\n443828.15\n03.06.2025\n03.06.2025\n3599\nMaxi Beograd\n2800.00\n0.00\n2800.00\n0.00\n441028.15`,true);
         }} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,borderRadius:8,padding:"9px 20px",fontSize:13,cursor:"pointer",textAlign:"center"}}>
-          📊 Загрузить демо-данные (Raiffeisen Serbia)
+          📊 Загрузить демо-данные (формат PDF)
         </button>
       </div>}
 
-      {/* ── OVERVIEW ── */}
       {tab==="overview"&&transactions.length>0&&<div style={{display:"flex",flexDirection:"column",gap:16}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
           {[
@@ -537,12 +581,10 @@ Budi konkretan, koristi brojke iz podataka. Piši kratko i jasno, koristi emoji 
             </div>
           ))}
         </div>
-
         {catData.length>0&&<div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
           <div style={{fontSize:13,fontWeight:600,marginBottom:14}}>Расходы по категориям</div>
           <BarChart data={catData.slice(0,10)}/>
         </div>}
-
         <div style={{background:C.accentSoft,borderRadius:12,padding:14,border:`1px solid ${C.accent}33`,display:"flex",gap:10,alignItems:"flex-start"}}>
           <span style={{fontSize:20}}>💡</span>
           <div>
@@ -552,7 +594,6 @@ Budi konkretan, koristi brojke iz podataka. Piši kratko i jasno, koristi emoji 
             </div>
           </div>
         </div>
-
         <div style={{background:C.card,borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
           <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
             <div style={{fontSize:13,fontWeight:600}}>Операции</div>
@@ -567,14 +608,12 @@ Budi konkretan, koristi brojke iz podataka. Piši kratko i jasno, koristi emoji 
             {filtered.slice(0,100).map(t=><TxRow key={t.id} t={t}/>)}
           </div>
         </div>
-
         <button onClick={()=>setTab("chat")}
           style={{background:`linear-gradient(135deg,${C.accent},#8B5CF6)`,color:"#fff",border:"none",borderRadius:10,padding:"12px 20px",fontSize:14,fontWeight:600,cursor:"pointer",textAlign:"center"}}>
           💬 Обсудить с ИИ-помощником →
         </button>
       </div>}
 
-      {/* ── MORTGAGE ── */}
       {tab==="mortgage"&&<div style={{display:"flex",flexDirection:"column",gap:16}}>
         <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div>
@@ -588,13 +627,9 @@ Budi konkretan, koristi brojke iz podataka. Piši kratko i jasno, koristi emoji 
         </div>
         {mortgage.enabled
           ? <MortgagePanel mortgage={mortgage} setMortgage={setMortgage}/>
-          : <div style={{textAlign:"center",padding:"40px 20px",color:C.muted,fontSize:14}}>
-              Включи ипотечный калькулятор кнопкой выше, затем введи параметры кредита
-            </div>
-        }
+          : <div style={{textAlign:"center",padding:"40px 20px",color:C.muted,fontSize:14}}>Включи калькулятор кнопкой выше</div>}
       </div>}
 
-      {/* ── CHAT ── */}
       {tab==="chat"&&<div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 180px)"}}>
         {messages.length<=1&&<div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
           {["Где я трачу больше всего?","Сколько могу откладывать?","Прогноз на следующий месяц","Стратегия накоплений","Когда погашу ипотеку?","Выгодно ли досрочное погашение?"].map(q=>(
@@ -606,9 +641,7 @@ Budi konkretan, koristi brojke iz podataka. Piši kratko i jasno, koristi emoji 
           {messages.map((m,i)=><Message key={i} msg={m}/>)}
           {loading&&<div style={{display:"flex",alignItems:"center",gap:8,color:C.muted,fontSize:13,marginBottom:12}}>
             <div style={{width:28,height:28,borderRadius:"50%",background:C.accentSoft,border:`1.5px solid ${C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}}>💡</div>
-            <div style={{display:"flex",gap:4}}>
-              {[0,1,2].map(i=><div key={i} style={{width:6,height:6,borderRadius:"50%",background:C.accent,animation:`pulse 1.2s ease-in-out ${i*0.2}s infinite`}}/>)}
-            </div>
+            <div style={{display:"flex",gap:4}}>{[0,1,2].map(i=><div key={i} style={{width:6,height:6,borderRadius:"50%",background:C.accent,animation:`pulse 1.2s ease-in-out ${i*0.2}s infinite`}}/>)}</div>
           </div>}
           <div ref={chatEndRef}/>
         </div>
@@ -618,9 +651,7 @@ Budi konkretan, koristi brojke iz podataka. Piši kratko i jasno, koristi emoji 
             placeholder="Спроси о бюджете или ипотеке..."
             style={{flex:1,background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"11px 16px",color:C.text,fontSize:14,outline:"none"}}/>
           <button onClick={sendMessage} disabled={loading||!chatInput.trim()}
-            style={{background:loading||!chatInput.trim()?C.dimmed:C.accent,color:"#fff",border:"none",borderRadius:12,width:44,height:44,fontSize:18,cursor:loading?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-            →
-          </button>
+            style={{background:loading||!chatInput.trim()?C.dimmed:C.accent,color:"#fff",border:"none",borderRadius:12,width:44,height:44,fontSize:18,cursor:loading?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>→</button>
         </div>
       </div>}
     </div>
