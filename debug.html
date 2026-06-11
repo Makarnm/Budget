@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>PDF Debug</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    body { background:#0F1117; color:#E8EAEE; font-family:monospace; padding:16px; font-size:12px; }
+    #drop { border:2px dashed #5B8AF5; border-radius:12px; padding:30px; text-align:center; cursor:pointer; margin-bottom:16px; }
+    #out { white-space:pre-wrap; background:#1E2336; padding:12px; border-radius:8px; max-height:80vh; overflow:auto; }
+    button { background:#5B8AF5; color:#fff; border:none; padding:8px 16px; border-radius:8px; cursor:pointer; margin:4px; }
+  </style>
+</head>
+<body>
+  <div id="drop" onclick="document.getElementById('f').click()">
+    📄 Tap to upload PDF
+    <input id="f" type="file" accept=".pdf" style="display:none" onchange="handleFile(this.files[0])">
+  </div>
+  <div>
+    <button onclick="showRaw()">Raw lines</button>
+    <button onclick="showTokens()">Tokens</button>
+    <button onclick="showParsed()">Parsed txs</button>
+  </div>
+  <div id="out">Upload a PDF to see debug output</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+let rawLines = [];
+let allItems = [];
+
+async function handleFile(file) {
+  document.getElementById('out').textContent = 'Reading...';
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+  rawLines = [];
+  allItems = [];
+  
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    
+    // Store all raw items with coordinates
+    for (const item of content.items) {
+      if (item.str && item.str.trim()) {
+        allItems.push({
+          page: p,
+          x: Math.round(item.transform[4]),
+          y: Math.round(item.transform[5]),
+          str: item.str,
+          w: Math.round(item.width)
+        });
+      }
+    }
+    
+    // Group by Y
+    const byY = {};
+    for (const item of content.items) {
+      const y = Math.round(item.transform[5]);
+      if (!byY[y]) byY[y] = [];
+      byY[y].push({x: item.transform[4], str: item.str});
+    }
+    const ys = Object.keys(byY).map(Number).sort((a,b) => b-a);
+    for (const y of ys) {
+      const line = byY[y].sort((a,b) => a.x-b.x).map(i => i.str).join(' ').trim();
+      if (line) rawLines.push({page: p, y, line});
+    }
+  }
+  
+  document.getElementById('out').textContent = `Loaded ${allItems.length} text items, ${rawLines.length} lines from ${pdf.numPages} pages.\nClick a button to inspect.`;
+}
+
+function showRaw() {
+  const out = rawLines.map(r => `[p${r.page} y=${r.y}] ${r.line}`).join('\n');
+  document.getElementById('out').textContent = out;
+}
+
+function showTokens() {
+  const tokens = rawLines.map(r => r.line.trim()).filter(Boolean);
+  document.getElementById('out').textContent = tokens.map((t,i) => `[${i}] ${JSON.stringify(t)}`).join('\n');
+}
+
+function showParsed() {
+  // Try to find date patterns in raw items
+  const dateRe = /\d{2}\.\d{2}\.\d{4}/;
+  const numRe = /^\d[\d,]*\.\d{2}$/;
+  
+  // Show items that look like transaction data
+  const interesting = allItems.filter(item => 
+    dateRe.test(item.str.trim()) || 
+    numRe.test(item.str.trim()) ||
+    item.str.length > 5
+  ).slice(0, 100);
+  
+  document.getElementById('out').textContent = interesting
+    .map(i => `p${i.page} x=${String(i.x).padStart(4)} y=${String(i.y).padStart(4)} w=${String(i.w).padStart(4)} | ${JSON.stringify(i.str)}`)
+    .join('\n');
+}
+</script>
+</body>
+</html>
