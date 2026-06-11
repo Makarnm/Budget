@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
@@ -26,121 +26,135 @@ const C = {
 };
 
 const CATEGORIES = {
-  "🍽️ Hrana"    :["maxi","lidl","idea","dis","delhaize","pekara","restoran","mcdonalds","kfc","pizza","kafic","kafana","supermarket","market","konzum","mercator","roda","tempo","univerexport","spar","mix markt","hungry","tutto","domaca trgovina"],
-  "🚗 Prevoz"   :["taxi","car go","yandex","bolt","uber","gorivo","benzin","petrol","parking","nis petrol","beopetrol","bus","tram","aksa"],
-  "🏠 Stambeni" :["kirija","stanarina","rent","komunal","struja","edb","water","voda","gas","srbijagas","infostan","skupstina","upravnik","zgrada","city facility","stamben","sondermajera","košara","heroja"],
-  "🏦 Hipoteka" :["hipoteka","kredit","loan","mortgage","annuitet","anuitet","otplata","stambeni kredit"],
-  "💊 Zdravlje" :["apoteka","pharmacy","klinika","doktor","bolnica","dental","stomatolog","analiza","lab","dragic","benu","dm filijala","dexy"],
-  "🎬 Zabava"   :["netflix","spotify","hbo","apple","steam","igra","game","bioskop","pozoriste","koncert","youtube","cinema"],
-  "🛍️ Kupovina":["zara","h&m","primark","reserved","lcwaikiki","sport","mango","fashion","obuca","odeca","alta group","emmezeta","jysk","ikea"],
-  "📱 Telefon"  :["telekom","yettel","a1 srbija","mts","internet","vip","telenor","mobilni","sbb"],
-  "✈️ Putovanje":["air serbia","wizair","ryanair","hotel","booking","airbnb","hostel","voz","zeleznica"],
-  "📚 Obrazovanje":["kurs","knjiga","skola","faculty","udemy","coursera","abc step"],
-  "💵 Gotovina" :["gotovinska isplata","smart atm","bankomat","atm"],
-  "💰 Prenos"   :["prenos na rn","zaduzenje","uplata","povracaj","refund","generali","epp ips","ips ipp"],
-  "💼 Prihod"   :["plata","salary","zarada","honorar","freelance","naknada za","isplata plate"],
-  "🏧 Banka"    :["naknada za vodenje","naknada za paket","provizija","fee","commission","kamate","osiguranje - paket"],
-  "🔧 Ostalo"   :[],
+  "🍽️ Food"      :["maxi","lidl","idea","dis","delhaize","pekara","restoran","mcdonalds","kfc","pizza","kafic","kafana","market","konzum","mercator","roda","tempo","univerexport","spar","mix markt","hungry","tutto","domaca trgovina","amrest"],
+  "🚗 Transport" :["taxi","car go","yandex","bolt","uber","gorivo","benzin","petrol","parking","nis petrol","beopetrol","bus","tram","aksa"],
+  "🏠 Housing"   :["kirija","stanarina","rent","komunal","struja","edb","water","voda","gas","srbijagas","infostan","skupstina","city facility","stamben","sondermajera","košara","heroja sa","zajednica"],
+  "🏦 Mortgage"  :["hipoteka","kredit","loan","mortgage","annuitet","anuitet","otplata","stambeni kredit"],
+  "💊 Health"    :["apoteka","pharmacy","klinika","doktor","bolnica","dental","stomatolog","analiza","lab","dragic","benu","dm filijala","dexy"],
+  "🎬 Entertainment":["netflix","spotify","hbo","apple","steam","igra","game","bioskop","pozoriste","koncert","youtube","cinema"],
+  "🛍️ Shopping"  :["zara","h&m","primark","reserved","lcwaikiki","sport","mango","fashion","obuca","odeca","alta group","emmezeta","jysk","ikea"],
+  "📱 Telecom"   :["telekom","yettel","a1 srbija","mts","internet","vip","telenor","mobilni","sbb"],
+  "✈️ Travel"    :["air serbia","wizair","ryanair","hotel","booking","airbnb","hostel","voz","zeleznica"],
+  "📚 Education" :["kurs","knjiga","skola","faculty","udemy","coursera","abc step","step by step"],
+  "💵 Cash ATM"  :["gotovinska isplata","smart atm","bankomat","atm"],
+  "💼 Income"    :["plata","salary","zarada","honorar","freelance","isplata plate"],
+  "🏧 Bank fees" :["naknada za vodenje","naknada za paket","provizija","kamate","osiguranje - paket","generali"],
+  "💸 Transfers" :["zaduženje","prenos na rn","epp ips","ips ipp","za karticu br"],
+  "🔧 Other"     :[],
 };
 
 function categorize(desc) {
   const l = (desc||"").toLowerCase();
-  for (const [cat,kws] of Object.entries(CATEGORIES)) {
+  for (const [cat,kws] of Object.entries(CATEGORIES))
     if (kws.some(k=>l.includes(k))) return cat;
-  }
-  return "🔧 Ostalo";
+  return "🔧 Other";
 }
 
-// ─── Parse Raiffeisen Serbia PDF extracted text ───────────────────────────────
-// Real PDF structure observed from actual bank statement:
-// Each transaction block looks like:
-//   "02.05.2025 03.05.2025 3599 OSIGURANJE - PAKET 1 40.00 RSD 40.00 0.00 419,943.47"
-//   or multi-line desc:
-//   "03.05.2025 03.05.2025 Zaduženje (EPP IPS),prenos\nna Rn:\n160000...-Generali Serbia\n0.00 7,500.00 0.00 412,443.47"
-// Key insight: each row ends with pattern: isplata  uplata  stanje (3 numbers)
-// and "Kurs:" lines appear after card transactions
+// ─── Parse Raiffeisen Serbia PDF text (extracted via pdf.js) ─────────────────
+// Structure after pdf.js extraction (grouped by Y position):
+// Each visual line becomes one text line.
+// Transaction rows: DATE1  DATE2  [CARD]  DESC...  then on next lines: amounts
+// Amounts pattern: "0.00 " (iznos_ref) then "X,XXX.XX RSD" (iznos_orig) then ISPLATA  UPLATA  STANJE
+// OR for IPS transfers: "0.00 " then ISPLATA  UPLATA  STANJE  (no RSD label)
 
 function parseRaiffeisenPDF(rawText) {
-  // Normalize: collapse "Kurs:\n0.00" and extra blank lines
-  let text = rawText
-    .replace(/Kurs:\s*\n\s*0\.00\s*/g, " ")
-    .replace(/Kurs:\s*/g, " ")
-    .replace(/\r/g, "")
-    .replace(/\n{3,}/g, "\n\n");
+  const dateRe = /^\d{2}\.\d{2}\.\d{4}$/;
+  const numRe  = /^\d[\d,]*\.\d{2}$/;
+  const cardRe = /^\d{3,5}$/;
 
-  const txs = [];
-  const dateRe = /\d{2}\.\d{2}\.\d{4}/;
+  const SKIP = [
+    'Datum prijema','Datum transakcije','izvršenja','ref. valuti',
+    'Iznos u','Iznos u orig','Isplata','Uplata','Stanje','Broj kartice','Opis promene',
+    'Za devizne','Za dinarske','važi na dan','Poštovani','prodajni','kupovni kurs',
+    'NIKITA MAKAROV','BULEVAR HEROJA','REON','Raiffeisen banka','Đorđa Stanojevića',
+    '11070 Beograd','Tel:','Fax:','Internet:','http','Datum: ','Izvod broj','Valuta:',
+    'Strana:','Izvod po tekućem','Prethodno stanje','STANJE','Nerealizovani',
+    '11 3202','11073 BEOGRAD','265000000706105590','PAK:',
+  ];
 
-  // Split into lines for processing
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-
-  // Parse number in Serbian format: 1.234,56 or 1,234.56 or plain 1234.56
-  function parseAmt(s) {
-    if (!s) return 0;
-    s = s.replace(/\s/g, "");
-    // Serbian: dot=thousands, comma=decimal  e.g. 419,943.47 — wait, PDF shows 419,943.47
-    // Actually from PDF: "419,943.47" uses comma=thousands, dot=decimal (US format in this PDF!)
-    // Confirm: "4,149.00", "4,023.71", "40.00" — YES, US number format
-    return parseFloat(s.replace(/,/g, "")) || 0;
+  function skipToken(t) {
+    if (!t) return true;
+    if (SKIP.some(p => t.includes(p))) return true;
+    if (['RSD','Kurs:','Datum','valuti'].includes(t)) return true;
+    if (/^Od \d/.test(t)) return true;
+    if (/^\d{5,}$/.test(t)) return true;          // long account numbers
+    if (/^\d\/\d$/.test(t)) return true;           // page "1/3"
+    if (/^419[,.]983/.test(t)) return true;        // opening balance
+    return false;
   }
 
-  // Regex to find 3 trailing numbers (isplata, uplata, stanje) at end of transaction
-  // They look like: "40.00 0.00 419,943.47" or "0.00 7,500.00 412,443.47"
-  const trailingNums = /(\d[\d,\.]*)\s+(\d[\d,\.]*)\s+(\d[\d,\.]*)\s*$/;
+  function parseNum(s) {
+    try { return parseFloat(s.replace(/,/g,'')) || 0; } catch { return 0; }
+  }
 
-  // Find transaction boundaries: lines starting with date pattern
-  // A transaction starts with: DATE1 DATE2 [CARDNUM] DESC... AMOUNTS
-  const txDateRe = /^(\d{2}\.\d{2}\.\d{4})\s+(\d{2}\.\d{2}\.\d{4})\s*(.*)/;
+  function isExpenseDesc(desc) {
+    const l = desc.toLowerCase();
+    return l.includes('zaduženje') || l.includes('zaduzenje') ||
+           l.includes('gotovinska isplata') || l.includes('smart atm') ||
+           l.includes('naknada za vodenje');
+  }
 
+  // Tokenize
+  const tokens = rawText.split(/\n+/).map(t=>t.trim()).filter(t=>t && !skipToken(t));
+
+  const txs = [];
   let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const m = txDateRe.exec(line);
-    if (!m) { i++; continue; }
 
-    const date1 = m[1];
-    const date2 = m[2];
-    let rest = m[3];
+  while (i < tokens.length) {
+    // Find transaction start: two consecutive dates
+    if (!dateRe.test(tokens[i])) { i++; continue; }
+    if (i+1 >= tokens.length || !dateRe.test(tokens[i+1])) { i++; continue; }
 
-    // Collect continuation lines until we find trailing 3 numbers
-    let j = i + 1;
-    while (j < lines.length) {
-      const nextLine = lines[j];
-      // Stop if next line starts a new transaction
-      if (txDateRe.test(nextLine)) break;
-      // Stop if it's a footer/header
-      if (/^(Za devizne|Za dinarske|Poštovani|STANJE|Nerealizovani|Datum|Iznos|Isplata|Uplata|Stanje|Broj kartice|Opis promene)/i.test(nextLine)) break;
-      rest += " " + nextLine;
-      j++;
+    const date1 = tokens[i];
+    i += 2; // skip date2
+
+    // Optional card number
+    if (i < tokens.length && cardRe.test(tokens[i])) i++;
+
+    // Collect description tokens until 3 consecutive numbers appear
+    const descParts = [];
+    while (i < tokens.length) {
+      const tok = tokens[i];
+      if (dateRe.test(tok)) break;
+      // Check if this and next 2 are all numbers → amounts block
+      if (numRe.test(tok) &&
+          i+1 < tokens.length && numRe.test(tokens[i+1]) &&
+          i+2 < tokens.length && numRe.test(tokens[i+2])) break;
+      descParts.push(tok);
+      i++;
     }
-    i = j;
 
-    // Extract trailing 3 numbers from rest
-    const tm = trailingNums.exec(rest.trim());
-    if (!tm) continue;
+    // Consume up to 3 numbers: isplata, uplata, stanje
+    const nums = [];
+    while (i < tokens.length && nums.length < 3) {
+      const tok = tokens[i];
+      if (numRe.test(tok)) { nums.push(parseNum(tok)); i++; }
+      else if (dateRe.test(tok)) break;
+      else { i++; }
+    }
+    if (nums.length < 2) continue;
 
-    const isplata = parseAmt(tm[1]);
-    const uplata  = parseAmt(tm[2]);
-    // stanje = parseAmt(tm[3]); // balance
+    const isplata = nums[0], uplata = nums[1];
 
-    // Description = rest minus the trailing numbers and card number
-    let desc = rest.replace(trailingNums, "").trim();
-    // Remove card number (3-5 digits at start)
-    desc = desc.replace(/^\d{3,5}\s+/, "");
-    // Remove inline "X.XX RSD" patterns (iznos ref valuti)
-    desc = desc.replace(/\d[\d,\.]*\s+RSD\s*/g, "").trim();
-    // Remove leading/trailing zeros
-    desc = desc.replace(/^\s*0\.00\s*/g, "").replace(/\s*0\.00\s*$/g, "").trim();
-
+    // Clean description
+    let desc = descParts.join(' ')
+      .replace(/\d[\d,]*\.\d{2}\s*RSD\b/g, '')
+      .replace(/\b0\.00\b/g, '')
+      .replace(/^Rn:\s*/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (!desc || desc.length < 3) continue;
 
-    // Determine amount: if isplata>0 it's expense, if uplata>0 it's income
-    // In Raiffeisen: isplata = outgoing (expense), uplata = incoming (income)
+    // Determine amount direction
     let amount = 0;
-    if (isplata > 0 && uplata === 0) amount = -isplata;
-    else if (uplata > 0 && isplata === 0) amount = uplata;
-    else if (uplata > 0) amount = uplata; // both set, treat as income (rare)
-    else continue;
+    if (isplata > 0 && uplata === 0) {
+      amount = -isplata;
+    } else if (uplata > 0 && isplata === 0) {
+      amount = isExpenseDesc(desc) ? -uplata : uplata;
+    } else if (isplata > 0 && uplata > 0) {
+      amount = isExpenseDesc(desc) ? -isplata : uplata;
+    }
+    if (amount === 0) continue;
 
     txs.push({
       id: Math.random().toString(36).slice(2),
@@ -155,7 +169,7 @@ function parseRaiffeisenPDF(rawText) {
   return txs;
 }
 
-// ─── Parse CSV fallback ──────────────────────────────────────────────────────
+// ─── CSV fallback ────────────────────────────────────────────────────────────
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/).filter(l=>l.trim());
   const txs = [];
@@ -165,14 +179,14 @@ function parseCSV(text) {
     let date=null, desc="", amount=0;
     for (const p of parts) {
       if (!date && /^\d{1,2}\.\d{1,2}\.\d{4}$/.test(p)) date=p;
-      else if (!date && /^\d{4}-\d{2}-\d{2}/.test(p)) { date=p.slice(0,10).split("-").reverse().join("."); }
+      else if (!date && /^\d{4}-\d{2}-\d{2}/.test(p)) date=p.slice(0,10).split("-").reverse().join(".");
     }
     desc = parts.find((p,i)=>i>0&&p.length>2&&!/^[\d.,\s\-]+$/.test(p)&&!/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(p)) || "";
     const numParts = parts.map(p=>parseFloat(p.replace(/\s/g,"").replace(",","."))).filter(v=>!isNaN(v)&&v!==0);
-    if (parts.length>=4) {
-      const debit=parseFloat((parts[parts.length-4]||"0").replace(/\s/g,"").replace(",","."))||0;
-      const credit=parseFloat((parts[parts.length-3]||"0").replace(/\s/g,"").replace(",","."))||0;
-      if(debit>0)amount=-debit; else if(credit>0)amount=credit;
+    if (parts.length>=4){
+      const d=parseFloat((parts[parts.length-4]||"0").replace(/\s/g,"").replace(",","."))||0;
+      const c=parseFloat((parts[parts.length-3]||"0").replace(/\s/g,"").replace(",","."))||0;
+      if(d>0)amount=-d; else if(c>0)amount=c;
     }
     if(!amount&&numParts.length)amount=numParts[numParts.length-1];
     if(desc&&amount!==0)txs.push({id:Math.random().toString(36).slice(2),date:date||"",description:desc,amount,currency:"RSD",category:categorize(desc),type:amount<0?"expense":"income"});
@@ -180,31 +194,21 @@ function parseCSV(text) {
   return txs;
 }
 
-// ─── localStorage persistence ────────────────────────────────────────────────
-const STORAGE_KEY = "raiffeisen_budget_v1";
-const MORTGAGE_KEY = "raiffeisen_mortgage_v1";
+// ─── Storage ─────────────────────────────────────────────────────────────────
+const STORAGE_KEY = "rb_budget_v2";
+const MORTGAGE_KEY = "rb_mortgage_v2";
 
-function loadTransactions() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+function loadTxs() {
+  try { const r=localStorage.getItem(STORAGE_KEY); return r?JSON.parse(r):[]; } catch { return []; }
 }
-
-function saveTransactions(txs) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(txs)); } catch {}
+function saveTxs(txs) {
+  try { localStorage.setItem(STORAGE_KEY,JSON.stringify(txs)); } catch {}
 }
-
 function loadMortgage() {
-  try {
-    const raw = localStorage.getItem(MORTGAGE_KEY);
-    return raw ? JSON.parse(raw) : {enabled:false,balance:50000,rate:4.5,payment:600,extraMonthly:0,currency:"EUR",notes:""};
-  } catch { return {enabled:false,balance:50000,rate:4.5,payment:600,extraMonthly:0,currency:"EUR",notes:""}; }
+  try { const r=localStorage.getItem(MORTGAGE_KEY); return r?JSON.parse(r):{enabled:false,balance:50000,rate:4.5,payment:600,extraMonthly:0,currency:"EUR",notes:""}; }
+  catch { return {enabled:false,balance:50000,rate:4.5,payment:600,extraMonthly:0,currency:"EUR",notes:""}; }
 }
-
-function saveMortgage(m) {
-  try { localStorage.setItem(MORTGAGE_KEY, JSON.stringify(m)); } catch {}
-}
+function saveMortgage(m) { try { localStorage.setItem(MORTGAGE_KEY,JSON.stringify(m)); } catch {} }
 
 // ─── AI context ───────────────────────────────────────────────────────────────
 function buildContext(transactions, mortgage) {
@@ -220,27 +224,24 @@ function buildContext(transactions, mortgage) {
       if(t.type==="income"){byMonth[m].income+=t.amount;totalIn+=t.amount;}
       else{byMonth[m].expense+=Math.abs(t.amount);totalEx+=Math.abs(t.amount);}
     }
-    ctx+=`FINANSIJSKI PODACI (${transactions.length} transakcija):\nUkupan prihod: ${totalIn.toFixed(0)} RSD\nUkupni rashodi: ${totalEx.toFixed(0)} RSD\nBilans: ${(totalIn-totalEx).toFixed(0)} RSD\n\n`;
-    ctx+="PO KATEGORIJAMA:\n"+Object.entries(byCat).sort((a,b)=>a[1]-b[1]).map(([c,v])=>`${c}: ${v.toFixed(0)} RSD`).join("\n")+"\n\n";
-    ctx+="PO MESECIMA:\n"+Object.entries(byMonth).sort().map(([m,v])=>`${m}: prihod ${v.income.toFixed(0)}, rashod ${v.expense.toFixed(0)}`).join("\n")+"\n\n";
-  } else { ctx+="Podaci o transakcijama nisu učitani.\n\n"; }
+    ctx+=`TRANSACTIONS (${transactions.length} total):\nTotal income: ${totalIn.toFixed(0)} RSD\nTotal expenses: ${totalEx.toFixed(0)} RSD\nBalance: ${(totalIn-totalEx).toFixed(0)} RSD\n\nBY CATEGORY:\n`;
+    ctx+=Object.entries(byCat).sort((a,b)=>a[1]-b[1]).map(([c,v])=>`${c}: ${v.toFixed(0)} RSD`).join("\n");
+    ctx+="\n\nBY MONTH:\n"+Object.entries(byMonth).sort().map(([m,v])=>`${m}: income ${v.income.toFixed(0)}, expenses ${v.expense.toFixed(0)}`).join("\n")+"\n\n";
+  } else { ctx+="No transaction data loaded.\n\n"; }
   if (mortgage.enabled) {
-    const bal=mortgage.balance,rate=mortgage.rate/100/12,pmt=mortgage.payment;
-    let months=0,bal2=bal,totalInt=0;
-    while(bal2>0&&months<600){const int=bal2*rate;const prin=pmt-int;if(prin<=0)break;totalInt+=int;bal2-=prin;months++;}
-    ctx+=`HIPOTEKA:\nOstatak: ${bal.toLocaleString()} ${mortgage.currency}\nStopa: ${mortgage.rate}%\nRata: ${pmt.toLocaleString()} ${mortgage.currency}\nDo otplate: ~${months} meseci (${(months/12).toFixed(1)} god)\nUkupna kamata: ~${totalInt.toFixed(0)} ${mortgage.currency}\n`;
+    const r=mortgage.rate/100/12, months=calcSchedule(mortgage.balance,mortgage.rate,mortgage.payment).length;
+    const totalInt=calcSchedule(mortgage.balance,mortgage.rate,mortgage.payment).reduce((s,r)=>s+r.interest,0);
+    ctx+=`MORTGAGE:\nBalance: ${mortgage.balance.toLocaleString()} ${mortgage.currency}\nRate: ${mortgage.rate}% annual\nPayment: ${mortgage.payment.toLocaleString()} ${mortgage.currency}/month\nMonths remaining: ~${months} (${(months/12).toFixed(1)} years)\nTotal interest: ~${totalInt.toFixed(0)} ${mortgage.currency}\n`;
   }
   return ctx;
 }
 
 function calcSchedule(balance,annualRate,payment,extraMonthly=0,extraOneTime=0) {
   const rate=annualRate/100/12;
-  const rows=[];
-  let bal=balance-extraOneTime,month=0;
+  const rows=[]; let bal=balance-extraOneTime, month=0;
   while(bal>0.01&&month<600){
     month++;
-    const interest=bal*rate;
-    const principal=(payment+extraMonthly)-interest;
+    const interest=bal*rate, principal=(payment+extraMonthly)-interest;
     if(principal<=0)break;
     bal=Math.max(0,bal-principal);
     rows.push({month,interest:+interest.toFixed(2),principal:+principal.toFixed(2),balance:+bal.toFixed(2)});
@@ -307,10 +308,9 @@ function MortgagePanel({mortgage,setMortgage}){
   const schedule=calcSchedule(mortgage.balance,mortgage.rate,mortgage.payment,mortgage.extraMonthly,extraOne);
   const scheduleBase=calcSchedule(mortgage.balance,mortgage.rate,mortgage.payment,0,0);
   const totalInt=schedule.reduce((s,r)=>s+r.interest,0);
-  const totalIntBase=scheduleBase.reduce((s,r)=>s+r.interest,0);
   const savedMonths=scheduleBase.length-schedule.length;
-  const savedInterest=totalIntBase-totalInt;
-  const payoffDate=(()=>{const d=new Date();d.setMonth(d.getMonth()+schedule.length);return d.toLocaleDateString("sr-RS",{month:"long",year:"numeric"});})();
+  const savedInterest=scheduleBase.reduce((s,r)=>s+r.interest,0)-totalInt;
+  const payoffDate=(()=>{const d=new Date();d.setMonth(d.getMonth()+schedule.length);return d.toLocaleDateString("en-GB",{month:"long",year:"numeric"});})();
   const chartPoints=[];
   for(let i=0;i<schedule.length;i+=Math.max(1,Math.floor(schedule.length/24)))chartPoints.push({x:i,y:schedule[i].balance});
   chartPoints.push({x:schedule.length,y:0});
@@ -318,31 +318,31 @@ function MortgagePanel({mortgage,setMortgage}){
   const pts=chartPoints.map(p=>`${(p.x/schedule.length)*chartW},${chartH-(p.y/mortgage.balance)*chartH}`).join(" ");
   return <div style={{display:"flex",flexDirection:"column",gap:16}}>
     <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
-      <div style={{fontSize:13,fontWeight:600,marginBottom:14}}>⚙️ Параметры ипотеки</div>
+      <div style={{fontSize:13,fontWeight:600,marginBottom:14}}>⚙️ Mortgage parameters</div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        <Field label="Остаток долга" value={mortgage.balance} onChange={e=>setMortgage(m=>({...m,balance:+e.target.value}))} suffix={mortgage.currency}/>
-        <Field label="Ставка в год" value={mortgage.rate} onChange={e=>setMortgage(m=>({...m,rate:+e.target.value}))} suffix="%"/>
-        <Field label="Месячный платёж" value={mortgage.payment} onChange={e=>setMortgage(m=>({...m,payment:+e.target.value}))} suffix={mortgage.currency}/>
+        <Field label="Remaining balance" value={mortgage.balance} onChange={e=>setMortgage(m=>({...m,balance:+e.target.value}))} suffix={mortgage.currency}/>
+        <Field label="Annual rate" value={mortgage.rate} onChange={e=>setMortgage(m=>({...m,rate:+e.target.value}))} suffix="%"/>
+        <Field label="Monthly payment" value={mortgage.payment} onChange={e=>setMortgage(m=>({...m,payment:+e.target.value}))} suffix={mortgage.currency}/>
         <div style={{display:"flex",flexDirection:"column",gap:4}}>
-          <label style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:0.5}}>Валюта</label>
+          <label style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:0.5}}>Currency</label>
           <select value={mortgage.currency} onChange={e=>setMortgage(m=>({...m,currency:e.target.value}))}
             style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 12px",color:C.text,fontSize:13,outline:"none"}}>
-            {["RSD","EUR","CHF","USD"].map(c=><option key={c}>{c}</option>)}
+            {["EUR","RSD","CHF","USD"].map(c=><option key={c}>{c}</option>)}
           </select>
         </div>
-        <Field label="Доп. платёж/мес" value={mortgage.extraMonthly} onChange={e=>setMortgage(m=>({...m,extraMonthly:+e.target.value}))} suffix={mortgage.currency}/>
-        <Field label="Разовый доп. платёж" value={extraOne} onChange={e=>setExtraOne(+e.target.value)} suffix={mortgage.currency}/>
+        <Field label="Extra / month" value={mortgage.extraMonthly} onChange={e=>setMortgage(m=>({...m,extraMonthly:+e.target.value}))} suffix={mortgage.currency}/>
+        <Field label="One-time extra payment" value={extraOne} onChange={e=>setExtraOne(+e.target.value)} suffix={mortgage.currency}/>
       </div>
       <div style={{marginTop:12}}>
-        <Field label="Заметки" value={mortgage.notes} onChange={e=>setMortgage(m=>({...m,notes:e.target.value}))} type="text" placeholder="Raiffeisen, условия..."/>
+        <Field label="Notes" value={mortgage.notes} onChange={e=>setMortgage(m=>({...m,notes:e.target.value}))} type="text" placeholder="Raiffeisen, fixed rate..."/>
       </div>
     </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:12}}>
       {[
-        {label:"Срок погашения",value:payoffDate,color:C.accent},
-        {label:"Месяцев осталось",value:`${schedule.length} мес.`,color:C.text},
-        {label:"Всего процентов",value:`${fmt(totalInt)} ${mortgage.currency}`,color:C.red},
-        {label:"Экономия досрочно",value:savedMonths>0?`${savedMonths} мес. / ${fmt(savedInterest)} ${mortgage.currency}`:"Нет доп. платежей",color:C.green},
+        {label:"Payoff date",value:payoffDate,color:C.accent},
+        {label:"Months remaining",value:`${schedule.length} mo.`,color:C.text},
+        {label:"Total interest",value:`${fmt(totalInt)} ${mortgage.currency}`,color:C.red},
+        {label:"Savings (early repay)",value:savedMonths>0?`${savedMonths} mo. / ${fmt(savedInterest)} ${mortgage.currency}`:"No extra payments",color:C.green},
       ].map(k=>(
         <div key={k.label} style={{background:C.card,borderRadius:12,padding:14,border:`1px solid ${C.border}`}}>
           <div style={{fontSize:11,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:0.4}}>{k.label}</div>
@@ -351,22 +351,22 @@ function MortgagePanel({mortgage,setMortgage}){
       ))}
     </div>
     <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
-      <div style={{fontSize:13,fontWeight:600,marginBottom:12}}>📉 График остатка долга</div>
+      <div style={{fontSize:13,fontWeight:600,marginBottom:12}}>📉 Balance over time</div>
       <svg width="100%" viewBox={`0 0 ${chartW} ${chartH+10}`} style={{overflow:"visible"}}>
         <defs><linearGradient id="grad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.accent} stopOpacity="0.3"/><stop offset="100%" stopColor={C.accent} stopOpacity="0"/></linearGradient></defs>
         <polygon points={`0,${chartH} ${pts} ${chartW},${chartH}`} fill="url(#grad)"/>
         <polyline points={pts} fill="none" stroke={C.accent} strokeWidth="2"/>
       </svg>
       <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.muted,marginTop:4}}>
-        <span>Сейчас: {fmt(mortgage.balance)} {mortgage.currency}</span>
+        <span>Now: {fmt(mortgage.balance)} {mortgage.currency}</span>
         <span>→ {payoffDate}</span>
       </div>
     </div>
     <div style={{background:C.card,borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
-      <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:600}}>График платежей (первые 24 мес.)</div>
+      <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:600}}>Amortisation schedule (first 24 months)</div>
       <div style={{overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-          <thead><tr style={{background:C.bg}}>{["Мес.","Платёж","% часть","Осн. часть","Остаток"].map(h=><th key={h} style={{padding:"8px 12px",color:C.muted,textAlign:"right",fontWeight:500,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+          <thead><tr style={{background:C.bg}}>{["Mo.","Payment","Interest","Principal","Balance"].map(h=><th key={h} style={{padding:"8px 12px",color:C.muted,textAlign:"right",fontWeight:500,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
           <tbody>
             {schedule.slice(0,24).map((r,i)=>(
               <tr key={r.month} style={{borderTop:`1px solid ${C.border}`,background:i%2===0?"transparent":C.surface}}>
@@ -380,7 +380,7 @@ function MortgagePanel({mortgage,setMortgage}){
           </tbody>
         </table>
       </div>
-      {schedule.length>24&&<div style={{padding:"10px 16px",fontSize:12,color:C.muted,borderTop:`1px solid ${C.border}`}}>... ещё {schedule.length-24} платежей</div>}
+      {schedule.length>24&&<div style={{padding:"10px 16px",fontSize:12,color:C.muted,borderTop:`1px solid ${C.border}`}}>... {schedule.length-24} more payments remaining</div>}
     </div>
   </div>;
 }
@@ -388,8 +388,8 @@ function MortgagePanel({mortgage,setMortgage}){
 // ═══════════════════════════════════════════════════════════════════════════
 function App() {
   const [tab,setTab]=useState("upload");
-  const [transactions,setTransactions]=useState(()=>loadTransactions());
-  const [messages,setMessages]=useState([{role:"assistant",content:"Zdravo! 👋 Tvoji prethodni podaci su učitani iz memorije.\n\nMožeš dodati novi izvod, pitati o troškovima ili izračunati hipoteku."}]);
+  const [transactions,setTransactions]=useState(()=>loadTxs());
+  const [messages,setMessages]=useState([{role:"assistant",content:"Hello! 👋 I'm your personal finance assistant.\n\nUpload a Raiffeisen Serbia PDF statement and I'll categorise your transactions, forecast spending, and help plan your savings and mortgage payoff."}]);
   const [chatInput,setChatInput]=useState("");
   const [loading,setLoading]=useState(false);
   const [pdfLoading,setPdfLoading]=useState(false);
@@ -401,15 +401,10 @@ function App() {
   const chatEndRef=useRef(null);
   const fileRef=useRef(null);
 
-  // Auto-save transactions and mortgage
-  useEffect(()=>{ saveTransactions(transactions); },[transactions]);
+  useEffect(()=>{ saveTxs(transactions); },[transactions]);
   useEffect(()=>{ saveMortgage(mortgage); },[mortgage]);
-  useEffect(()=>{chatEndRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
-
-  // Show saved data count on first load
-  useEffect(()=>{
-    if(transactions.length>0) setTab("overview");
-  },[]);
+  useEffect(()=>{ chatEndRef.current?.scrollIntoView({behavior:"smooth"}); },[messages]);
+  useEffect(()=>{ if(transactions.length>0) setTab("overview"); },[]);
 
   const loadPdfJs=useCallback(()=>new Promise((resolve,reject)=>{
     if(window.pdfjsLib){resolve(window.pdfjsLib);return;}
@@ -422,24 +417,22 @@ function App() {
 
   const extractPdfText=useCallback(async(file)=>{
     const pdfjsLib=await loadPdfJs();
-    const arrayBuffer=await file.arrayBuffer();
-    const pdf=await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+    const buf=await file.arrayBuffer();
+    const pdf=await pdfjsLib.getDocument({data:buf}).promise;
     let fullText="";
     for(let p=1;p<=pdf.numPages;p++){
       const page=await pdf.getPage(p);
       const content=await page.getTextContent();
-      // Group text items by Y position (same line), sort by X
       const byY={};
       for(const item of content.items){
         const y=Math.round(item.transform[5]);
         if(!byY[y])byY[y]=[];
         byY[y].push({x:item.transform[4],str:item.str});
       }
-      // Sort lines top-to-bottom, items left-to-right
-      const sortedYs=Object.keys(byY).map(Number).sort((a,b)=>b-a);
-      for(const y of sortedYs){
-        const lineItems=byY[y].sort((a,b)=>a.x-b.x);
-        fullText+=lineItems.map(i=>i.str).join(" ")+"\n";
+      const ys=Object.keys(byY).map(Number).sort((a,b)=>b-a);
+      for(const y of ys){
+        const line=byY[y].sort((a,b)=>a.x-b.x).map(i=>i.str).join(" ").trim();
+        if(line) fullText+=line+"\n";
       }
       fullText+="\n";
     }
@@ -449,16 +442,15 @@ function App() {
   const processText=useCallback((text,isPdf=false)=>{
     const parsed=isPdf?parseRaiffeisenPDF(text):parseCSV(text);
     if(!parsed.length){
-      setParseLog("⚠️ Nije moguće prepoznati transakcije. Proveri format.");
+      setParseLog("⚠️ Could not recognise any transactions. Check the file format.");
       return;
     }
-    // Deduplicate by date+description+amount
     setTransactions(prev=>{
       const existing=new Set(prev.map(t=>`${t.date}|${t.description}|${t.amount}`));
       const newTxs=parsed.filter(t=>!existing.has(`${t.date}|${t.description}|${t.amount}`));
-      const merged=[...prev,...newTxs];
       const dupes=parsed.length-newTxs.length;
-      setParseLog(`✅ Добавлено ${newTxs.length} транзакций${dupes>0?` (${dupes} дублей пропущено)`:""} · Всего: ${merged.length}`);
+      const merged=[...prev,...newTxs];
+      setParseLog(`✅ Added ${newTxs.length} transactions${dupes>0?` (${dupes} duplicates skipped)`:""} · Total: ${merged.length}`);
       return merged;
     });
     setTab("overview");
@@ -468,12 +460,12 @@ function App() {
     const isPdf=file.name.toLowerCase().endsWith(".pdf");
     if(isPdf){
       setPdfLoading(true);
-      setParseLog("📄 Читаю PDF...");
+      setParseLog("📄 Reading PDF...");
       try{
         const text=await extractPdfText(file);
         processText(text,true);
       }catch(e){
-        setParseLog("⚠️ Ошибка: "+e.message);
+        setParseLog("⚠️ PDF error: "+e.message);
       }finally{setPdfLoading(false);}
     }else{
       const r=new FileReader();
@@ -485,7 +477,8 @@ function App() {
   const clearAll=()=>{
     setTransactions([]);
     localStorage.removeItem(STORAGE_KEY);
-    setParseLog("🗑️ Все данные удалены");
+    localStorage.removeItem(MORTGAGE_KEY);
+    setParseLog("🗑️ All data cleared");
     setShowClearConfirm(false);
     setTab("upload");
   };
@@ -497,12 +490,12 @@ function App() {
     setMessages(prev=>[...prev,userMsg]);
     setLoading(true);
     const ctx=buildContext(transactions,mortgage);
-    const sys=`Ti si iskusan lični finansijski savetnik za korisnika koji živi u Beogradu, Srbija (ime: Nikita). Odgovaraj na ruskom jeziku.
+    const sys=`You are an expert personal finance advisor for a user living in Belgrade, Serbia. Reply in Russian language.
 
-Finansijski podaci:
+User financial data:
 ${ctx}
 
-Budi konkretan, koristi brojke. Kratko i jasno, koristi emoji. Valuta RSD.`;
+Be specific, use actual numbers. Keep answers concise with emoji. Currency is RSD (Serbian dinar), mortgage may be in EUR.`;
     const history=messages.slice(-10).map(m=>({role:m.role,content:m.content}));
     history.push(userMsg);
     try{
@@ -511,10 +504,10 @@ Budi konkretan, koristi brojke. Kratko i jasno, koristi emoji. Valuta RSD.`;
         body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:history}),
       });
       const data=await res.json();
-      const reply=data.content?.map(b=>b.text||"").join("")||"Ошибка ответа.";
+      const reply=data.content?.map(b=>b.text||"").join("")||"Error getting response.";
       setMessages(prev=>[...prev,{role:"assistant",content:reply}]);
     }catch{
-      setMessages(prev=>[...prev,{role:"assistant",content:"⚠️ Ошибка API."}]);
+      setMessages(prev=>[...prev,{role:"assistant",content:"⚠️ API error. Check your connection."}]);
     }finally{setLoading(false);}
   };
 
@@ -525,16 +518,14 @@ Budi konkretan, koristi brojke. Kratko i jasno, koristi emoji. Valuta RSD.`;
   for(const t of transactions.filter(t=>t.type==="expense"))expByCat[t.category]=(expByCat[t.category]||0)+Math.abs(t.amount);
   const catData=Object.entries(expByCat).sort((a,b)=>b[1]-a[1]).map(([label,value])=>({label,value}));
   const filtered=txFilter==="all"?transactions:transactions.filter(t=>t.type===txFilter);
-
-  // Date range summary
   const dates=transactions.map(t=>t.date).filter(Boolean).sort();
   const dateRange=dates.length>1?`${dates[0]} — ${dates[dates.length-1]}`:"";
 
   const TABS=[
-    {id:"upload",label:"+ Добавить"},
-    {id:"overview",label:"Обзор",disabled:!transactions.length},
-    {id:"mortgage",label:"Ипотека"},
-    {id:"chat",label:"ИИ-чат"},
+    {id:"upload",label:"+ Add"},
+    {id:"overview",label:"Overview",disabled:!transactions.length},
+    {id:"mortgage",label:"Mortgage"},
+    {id:"chat",label:"AI Chat"},
   ];
 
   return <div style={{background:C.bg,minHeight:"100vh",fontFamily:"'Inter','SF Pro Display',system-ui,sans-serif",color:C.text}}>
@@ -544,34 +535,33 @@ Budi konkretan, koristi brojke. Kratko i jasno, koristi emoji. Valuta RSD.`;
         <div>
           <div style={{fontSize:15,fontWeight:700,letterSpacing:-0.3}}>Family Budget AI</div>
           <div style={{fontSize:10,color:C.muted,letterSpacing:0.4,textTransform:"uppercase"}}>
-            {transactions.length>0?`${transactions.length} операций · сохранено`:"Raiffeisen Serbia"}
+            {transactions.length>0?`${transactions.length} transactions · saved`:"Raiffeisen Serbia"}
           </div>
         </div>
       </div>
       {transactions.length>0&&(
         <button onClick={()=>setShowClearConfirm(true)}
           style={{background:"none",border:`1px solid ${C.red}66`,color:C.red,fontSize:11,padding:"4px 10px",borderRadius:20,cursor:"pointer"}}>
-          🗑️ Сбросить
+          🗑️ Clear all
         </button>
       )}
     </div>
 
-    {/* Clear confirmation modal */}
-    {showClearConfirm&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+    {showClearConfirm&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{background:C.card,borderRadius:16,padding:24,border:`1px solid ${C.border}`,maxWidth:320,width:"100%"}}>
-        <div style={{fontSize:20,marginBottom:12,textAlign:"center"}}>🗑️</div>
-        <div style={{fontSize:15,fontWeight:600,marginBottom:8,textAlign:"center"}}>Удалить все данные?</div>
+        <div style={{fontSize:24,marginBottom:10,textAlign:"center"}}>🗑️</div>
+        <div style={{fontSize:15,fontWeight:600,marginBottom:8,textAlign:"center"}}>Delete all data?</div>
         <div style={{fontSize:13,color:C.muted,marginBottom:20,textAlign:"center",lineHeight:1.5}}>
-          Будут удалены все {transactions.length} транзакций из всех загруженных выписок. Это действие нельзя отменить.
+          This will permanently delete all {transactions.length} transactions. This cannot be undone.
         </div>
         <div style={{display:"flex",gap:10}}>
           <button onClick={()=>setShowClearConfirm(false)}
             style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,color:C.text,borderRadius:10,padding:"10px",fontSize:14,cursor:"pointer"}}>
-            Отмена
+            Cancel
           </button>
           <button onClick={clearAll}
             style={{flex:1,background:C.red,border:"none",color:"#fff",borderRadius:10,padding:"10px",fontSize:14,fontWeight:600,cursor:"pointer"}}>
-            Удалить всё
+            Delete all
           </button>
         </div>
       </div>
@@ -590,14 +580,12 @@ Budi konkretan, koristi brojke. Kratko i jasno, koristi emoji. Valuta RSD.`;
 
     <div style={{maxWidth:800,margin:"0 auto",padding:"20px 16px"}}>
 
-      {/* ── UPLOAD ── */}
       {tab==="upload"&&<div style={{display:"flex",flexDirection:"column",gap:16}}>
-
         {transactions.length>0&&<div style={{background:C.greenSoft,border:`1px solid ${C.green}44`,borderRadius:12,padding:14,display:"flex",alignItems:"center",gap:10}}>
           <span style={{fontSize:20}}>💾</span>
           <div>
-            <div style={{fontSize:13,fontWeight:600,color:C.green}}>Данные сохранены в памяти устройства</div>
-            <div style={{fontSize:12,color:C.muted,marginTop:2}}>{transactions.length} операций · {dateRange}</div>
+            <div style={{fontSize:13,fontWeight:600,color:C.green}}>Data saved on this device</div>
+            <div style={{fontSize:12,color:C.muted,marginTop:2}}>{transactions.length} transactions · {dateRange}</div>
           </div>
         </div>}
 
@@ -607,25 +595,28 @@ Budi konkretan, koristi brojke. Kratko i jasno, koristi emoji. Valuta RSD.`;
             onChange={e=>{const f=e.target.files[0];if(f)handleFile(f);e.target.value="";}}/>
           <div style={{fontSize:40,marginBottom:12}}>{pdfLoading?"⏳":"📄"}</div>
           <div style={{fontSize:15,fontWeight:600,marginBottom:6}}>
-            {pdfLoading?"Читаю PDF...":transactions.length>0?"Добавить ещё выписку":"Загрузить выписку Raiffeisen"}
+            {pdfLoading?"Reading PDF...":transactions.length>0?"Add another statement":"Upload Raiffeisen statement"}
           </div>
-          <div style={{fontSize:13,color:C.muted,marginBottom:12}}>PDF или CSV из интернет-банка raiffeisenbank.rs</div>
+          <div style={{fontSize:13,color:C.muted,marginBottom:12}}>PDF or CSV from raiffeisenbank.rs</div>
           <div style={{display:"flex",justifyContent:"center",gap:8}}>
             {["PDF","CSV"].map(f=><span key={f} style={{background:C.accentSoft,color:C.accent,fontSize:11,padding:"3px 10px",borderRadius:20,border:`1px solid ${C.accent}44`}}>{f}</span>)}
           </div>
         </div>
 
-        {parseLog&&<div style={{padding:"10px 14px",borderRadius:8,background:parseLog.startsWith("✅")?C.greenSoft:parseLog.startsWith("🗑️")?C.redSoft:C.amberSoft,border:`1px solid ${parseLog.startsWith("✅")?C.green:parseLog.startsWith("🗑️")?C.red:C.amber}44`,fontSize:13,color:parseLog.startsWith("✅")?C.green:parseLog.startsWith("🗑️")?C.red:C.amber}}>
+        {parseLog&&<div style={{padding:"10px 14px",borderRadius:8,
+          background:parseLog.startsWith("✅")?C.greenSoft:parseLog.startsWith("🗑️")?C.redSoft:C.amberSoft,
+          border:`1px solid ${parseLog.startsWith("✅")?C.green:parseLog.startsWith("🗑️")?C.red:C.amber}44`,
+          fontSize:13,color:parseLog.startsWith("✅")?C.green:parseLog.startsWith("🗑️")?C.red:C.amber}}>
           {parseLog}
         </div>}
 
         <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
-          <div style={{fontSize:12,color:C.muted,marginBottom:12,textTransform:"uppercase",letterSpacing:0.5}}>Как скачать PDF из Raiffeisen Serbia</div>
+          <div style={{fontSize:12,color:C.muted,marginBottom:12,textTransform:"uppercase",letterSpacing:0.5}}>How to download from Raiffeisen Serbia</div>
           {[
             {n:"1",t:"raiffeisenbank.rs → Internet bankarstvo → login"},
-            {n:"2",t:"Moj račun → Izvodi i transakcije → izabrati račun"},
-            {n:"3",t:"Odabrati period → Preuzmi izvod → PDF"},
-            {n:"4",t:"Загрузить файл выше — новые данные добавятся к уже загруженным"},
+            {n:"2",t:"Moj račun → Izvodi i transakcije → select account"},
+            {n:"3",t:"Choose period → Preuzmi izvod → PDF"},
+            {n:"4",t:"Upload above — new data merges with existing (duplicates skipped)"},
           ].map(s=>(
             <div key={s.n} style={{display:"flex",gap:10,marginBottom:10,alignItems:"flex-start"}}>
               <div style={{width:22,height:22,borderRadius:"50%",background:C.accentSoft,border:`1px solid ${C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:C.accent,flexShrink:0,marginTop:1}}>{s.n}</div>
@@ -635,27 +626,24 @@ Budi konkretan, koristi brojke. Kratko i jasno, koristi emoji. Valuta RSD.`;
         </div>
 
         <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
-          <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Или вставить CSV вручную</div>
+          <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Or paste CSV manually</div>
           <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)}
             placeholder={"01.06.2025;Maxi supermarket;1850;0;98150;RSD\n05.06.2025;Car Go taksi;450;0;97700;RSD"}
             style={{width:"100%",height:90,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",color:C.text,fontFamily:"monospace",fontSize:12,resize:"vertical",outline:"none",boxSizing:"border-box"}}/>
           <button onClick={()=>{if(pasteText.trim())processText(pasteText,false);}}
             style={{marginTop:10,background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"9px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-            Добавить →
+            Add →
           </button>
         </div>
       </div>}
 
-      {/* ── OVERVIEW ── */}
       {tab==="overview"&&transactions.length>0&&<div style={{display:"flex",flexDirection:"column",gap:16}}>
-        {dateRange&&<div style={{fontSize:12,color:C.muted,textAlign:"center",padding:"4px 0"}}>
-          📅 Период: {dateRange}
-        </div>}
+        {dateRange&&<div style={{fontSize:12,color:C.muted,textAlign:"center"}}>📅 {dateRange}</div>}
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
           {[
-            {label:"Доходы",value:income,color:C.green,bg:C.greenSoft,pre:"+"},
-            {label:"Расходы",value:expense,color:C.red,bg:C.redSoft,pre:"-"},
-            {label:"Баланс",value:balance,color:balance>=0?C.green:C.red,bg:balance>=0?C.greenSoft:C.redSoft,pre:balance>=0?"+":""},
+            {label:"Income",value:income,color:C.green,bg:C.greenSoft,pre:"+"},
+            {label:"Expenses",value:expense,color:C.red,bg:C.redSoft,pre:"-"},
+            {label:"Balance",value:balance,color:balance>=0?C.green:C.red,bg:balance>=0?C.greenSoft:C.redSoft,pre:balance>=0?"+":""},
           ].map(k=>(
             <div key={k.label} style={{background:k.bg,border:`1px solid ${k.color}33`,borderRadius:12,padding:14}}>
               <div style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{k.label}</div>
@@ -664,59 +652,60 @@ Budi konkretan, koristi brojke. Kratko i jasno, koristi emoji. Valuta RSD.`;
           ))}
         </div>
         {catData.length>0&&<div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
-          <div style={{fontSize:13,fontWeight:600,marginBottom:14}}>Расходы по категориям</div>
+          <div style={{fontSize:13,fontWeight:600,marginBottom:14}}>Expenses by category</div>
           <BarChart data={catData.slice(0,12)}/>
         </div>}
         <div style={{background:C.accentSoft,borderRadius:12,padding:14,border:`1px solid ${C.accent}33`,display:"flex",gap:10,alignItems:"flex-start"}}>
           <span style={{fontSize:20}}>💡</span>
           <div>
-            <div style={{fontSize:13,fontWeight:600,color:C.accent,marginBottom:4}}>Правило 50/30/20</div>
+            <div style={{fontSize:13,fontWeight:600,color:C.accent,marginBottom:4}}>50/30/20 rule</div>
             <div style={{fontSize:12,color:C.muted,lineHeight:1.5}}>
-              Нужды: <b style={{color:C.text}}>{fmt(income*0.5)}</b> · Желания: <b style={{color:C.text}}>{fmt(income*0.3)}</b> · Сбережения: <b style={{color:C.green}}>{fmt(income*0.2)}</b>
+              Needs: <b style={{color:C.text}}>{fmt(income*0.5)}</b> · Wants: <b style={{color:C.text}}>{fmt(income*0.3)}</b> · Savings: <b style={{color:C.green}}>{fmt(income*0.2)}</b>
             </div>
           </div>
         </div>
         <div style={{background:C.card,borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
           <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
-            <div style={{fontSize:13,fontWeight:600}}>Операции ({filtered.length})</div>
+            <div style={{fontSize:13,fontWeight:600}}>Transactions ({filtered.length})</div>
             <div style={{display:"flex",gap:6}}>
-              {[["all","Все"],["expense","Расходы"],["income","Доходы"]].map(([v,l])=>(
+              {[["all","All"],["expense","Expenses"],["income","Income"]].map(([v,l])=>(
                 <button key={v} onClick={()=>setTxFilter(v)}
                   style={{background:txFilter===v?C.accent:"none",border:`1px solid ${txFilter===v?C.accent:C.border}`,color:txFilter===v?"#fff":C.muted,fontSize:11,padding:"3px 10px",borderRadius:20,cursor:"pointer"}}>{l}</button>
               ))}
             </div>
           </div>
           <div style={{maxHeight:350,overflowY:"auto"}}>
-            {filtered.slice().sort((a,b)=>b.date.split(".").reverse().join("")-a.date.split(".").reverse().join("")).slice(0,150).map(t=><TxRow key={t.id} t={t}/>)}
-            {filtered.length>150&&<div style={{padding:"10px",fontSize:12,color:C.muted,textAlign:"center"}}>Показаны 150 из {filtered.length}</div>}
+            {filtered.slice().sort((a,b)=>{
+              const da=a.date.split(".").reverse().join(""), db=b.date.split(".").reverse().join("");
+              return db.localeCompare(da);
+            }).slice(0,150).map(t=><TxRow key={t.id} t={t}/>)}
+            {filtered.length>150&&<div style={{padding:"10px",fontSize:12,color:C.muted,textAlign:"center"}}>Showing 150 of {filtered.length}</div>}
           </div>
         </div>
         <button onClick={()=>setTab("chat")}
           style={{background:`linear-gradient(135deg,${C.accent},#8B5CF6)`,color:"#fff",border:"none",borderRadius:10,padding:"12px 20px",fontSize:14,fontWeight:600,cursor:"pointer",textAlign:"center"}}>
-          💬 Обсудить с ИИ-помощником →
+          💬 Discuss with AI assistant →
         </button>
       </div>}
 
-      {/* ── MORTGAGE ── */}
       {tab==="mortgage"&&<div style={{display:"flex",flexDirection:"column",gap:16}}>
         <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div>
-            <div style={{fontSize:14,fontWeight:600}}>🏦 Ипотечный калькулятор</div>
-            <div style={{fontSize:12,color:C.muted,marginTop:2}}>Настройки сохраняются автоматически</div>
+            <div style={{fontSize:14,fontWeight:600}}>🏦 Mortgage calculator</div>
+            <div style={{fontSize:12,color:C.muted,marginTop:2}}>Settings saved automatically</div>
           </div>
           <button onClick={()=>setMortgage(m=>({...m,enabled:!m.enabled}))}
             style={{background:mortgage.enabled?C.green:C.dimmed,border:"none",borderRadius:20,padding:"6px 16px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>
-            {mortgage.enabled?"Включено":"Выключено"}
+            {mortgage.enabled?"On":"Off"}
           </button>
         </div>
         {mortgage.enabled?<MortgagePanel mortgage={mortgage} setMortgage={setMortgage}/>
-          :<div style={{textAlign:"center",padding:"40px 20px",color:C.muted,fontSize:14}}>Включи калькулятор кнопкой выше</div>}
+          :<div style={{textAlign:"center",padding:"40px 20px",color:C.muted,fontSize:14}}>Enable the calculator above</div>}
       </div>}
 
-      {/* ── CHAT ── */}
       {tab==="chat"&&<div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 180px)"}}>
         {messages.length<=1&&<div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
-          {["Где я трачу больше всего?","Сколько могу откладывать?","Прогноз на следующий месяц","Стратегия накоплений","Когда погашу ипотеку?","Выгодно ли досрочное погашение?","Анализ наличных снятий"].map(q=>(
+          {["Where do I spend the most?","How much can I save?","Forecast next month","Savings strategy","When will mortgage be paid off?","Is early repayment worth it?","Analyse my cash withdrawals"].map(q=>(
             <button key={q} onClick={()=>setChatInput(q)}
               style={{background:C.card,border:`1px solid ${C.border}`,color:C.muted,fontSize:12,padding:"6px 12px",borderRadius:20,cursor:"pointer"}}>{q}</button>
           ))}
@@ -732,7 +721,7 @@ Budi konkretan, koristi brojke. Kratko i jasno, koristi emoji. Valuta RSD.`;
         <div style={{display:"flex",gap:10,marginTop:12,padding:"12px 0"}}>
           <input value={chatInput} onChange={e=>setChatInput(e.target.value)}
             onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();}}}
-            placeholder="Спроси о бюджете или ипотеке..."
+            placeholder="Ask about your budget or mortgage..."
             style={{flex:1,background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"11px 16px",color:C.text,fontSize:14,outline:"none"}}/>
           <button onClick={sendMessage} disabled={loading||!chatInput.trim()}
             style={{background:loading||!chatInput.trim()?C.dimmed:C.accent,color:"#fff",border:"none",borderRadius:12,width:44,height:44,fontSize:18,cursor:loading?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>→</button>
