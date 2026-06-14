@@ -26,21 +26,21 @@ const C = {
 };
 
 const CATEGORIES = {
-  "🍽️ Food"      :["maxi","lidl","idea","dis","delhaize","pekara","restoran","mcdonalds","kfc","pizza","kafic","kafana","market","konzum","mercator","roda","tempo","univerexport","spar","mix markt","hungry","tutto","domaca trgovina","amrest"],
-  "🚗 Transport" :["taxi","car go","yandex","bolt","uber","gorivo","benzin","petrol","parking","nis petrol","beopetrol","bus","tram","aksa"],
-  "🏠 Housing"   :["kirija","stanarina","rent","komunal","struja","edb","water","voda","gas","srbijagas","infostan","skupstina","city facility","stamben","sondermajera","košara","heroja sa","zajednica"],
-  "🏦 Mortgage"  :["hipoteka","kredit","loan","mortgage","annuitet","anuitet","otplata","stambeni kredit"],
-  "💊 Health"    :["apoteka","pharmacy","klinika","doktor","bolnica","dental","stomatolog","analiza","lab","dragic","benu","dm filijala","dexy"],
-  "🎬 Entertainment":["netflix","spotify","hbo","apple","steam","igra","game","bioskop","pozoriste","koncert","youtube","cinema"],
-  "🛍️ Shopping"  :["zara","h&m","primark","reserved","lcwaikiki","sport","mango","fashion","obuca","odeca","alta group","emmezeta","jysk","ikea"],
-  "📱 Telecom"   :["telekom","yettel","a1 srbija","mts","internet","vip","telenor","mobilni","sbb"],
-  "✈️ Travel"    :["air serbia","wizair","ryanair","hotel","booking","airbnb","hostel","voz","zeleznica"],
-  "📚 Education" :["kurs","knjiga","skola","faculty","udemy","coursera","abc step","step by step"],
-  "💵 Cash ATM"  :["gotovinska isplata","smart atm","bankomat","atm"],
-  "💼 Income"    :["plata","salary","zarada","honorar","freelance","isplata plate"],
-  "🏧 Bank fees" :["naknada za vodenje","naknada za paket","provizija","kamate","osiguranje - paket","generali"],
-  "💸 Transfers" :["zaduženje","prenos na rn","epp ips","ips ipp","za karticu br"],
-  "🔧 Other"     :[],
+  "🍽️ Food"        :["maxi","lidl","idea","dis","delhaize","pekara","restoran","mcdonalds","kfc","pizza","kafic","kafana","market","konzum","mercator","roda","tempo","univerexport","spar","mix markt","hungry","tutto","domaca trgovina","amrest","tortizza","payspot pekara","the one bg","aik oml"],
+  "🚗 Transport"   :["taxi","car go","yandex","bolt","uber","gorivo","benzin","petrol","parking","nis petrol","beopetrol","bus","tram","aksa"],
+  "🏠 Housing"     :["kirija","stanarina","rent","komunal","struja","edb","water","voda","gas","srbijagas","infostan","skupstina","city facility","stamben","sondermajera","zajednica","sada odmor","blokowski"],
+  "🏦 Mortgage"    :["hipoteka","kredit","loan","mortgage","annuitet","anuitet","otplata","stambeni kredit"],
+  "💊 Health"      :["apoteka","pharmacy","klinika","doktor","bolnica","dental","stomatolog","analiza","lab","dragic","benu","dm filijala","dexy","immo center"],
+  "🎬 Entertainment":["netflix","spotify","hbo","apple","steam","igra","game","bioskop","pozoriste","koncert","youtube","cinema","expli"],
+  "🛍️ Shopping"    :["zara","h&m","primark","reserved","lcwaikiki","sport","mango","fashion","obuca","odeca","alta group","emmezeta","jysk","ikea","statovac","komerc"],
+  "📱 Telecom"     :["telekom","yettel","a1 srbija","mts","internet","vip","telenor","mobilni","sbb"],
+  "✈️ Travel"      :["air serbia","wizair","ryanair","hotel","booking","airbnb","hostel","voz","zeleznica"],
+  "📚 Education"   :["kurs","knjiga","skola","faculty","udemy","coursera","abc step","step by step"],
+  "💵 Cash ATM"    :["gotovinska isplata","smart atm","bankomat","atm"],
+  "💼 Income"      :["plata","salary","zarada","honorar","freelance","isplata plate","odobrenje"],
+  "🏧 Bank fees"   :["naknada za vodenje","naknada za paket","provizija","kamate","osiguranje - paket","osiguranje – paket","generali"],
+  "💸 Transfers"   :["zaduženje","zaduzenje","prenos na rn","prenos sa","epp ips","ips ipp","za karticu br"],
+  "🔧 Other"       :[],
 };
 
 function categorize(desc) {
@@ -50,111 +50,153 @@ function categorize(desc) {
   return "🔧 Other";
 }
 
-// ─── Parse Raiffeisen Serbia PDF text (extracted via pdf.js) ─────────────────
-// Structure after pdf.js extraction (grouped by Y position):
-// Each visual line becomes one text line.
-// Transaction rows: DATE1  DATE2  [CARD]  DESC...  then on next lines: amounts
-// Amounts pattern: "0.00 " (iznos_ref) then "X,XXX.XX RSD" (iznos_orig) then ISPLATA  UPLATA  STANJE
-// OR for IPS transfers: "0.00 " then ISPLATA  UPLATA  STANJE  (no RSD label)
+// ─── Parse Raiffeisen Serbia PDF ─────────────────────────────────────────────
+// ACTUAL structure from pdf.js on iPhone (confirmed via debug tool):
+//
+// Each card transaction = ONE line:
+//   "31.10.2025   01.11.2025 3599   AIK OML. BRIGADA 86 SRB 0.00 15,000.00 0.00 366,576.65"
+// Followed by: "15,000.00 RSD"  then  "BEOGRAD Kurs:"  (or just "Kurs:")
+//
+// IPS/EPP transfer = main line + continuation lines:
+//   "02.11.2025   02.11.2025 Odobrenje (IPS IPP),prenos sa 0.00 0.00 3,605.00 369,532.65"
+//   "Rn:"
+//   "265000000701161306-ILARIO"
+//   "N KURBATOV"
+//
+// Description with overflow (e.g. OSIGURANJE – PAKET 1 appears on line BEFORE the date line):
+//   "OSIGURANJE – PAKET 1"
+//   "02.11.2025   03.11.2025 3599   0.00 40.00 0.00 357,228.65"
+//
+// Main transaction line regex:
+//   DATE  DATE  [CARD]  DESC_PART  IZNOS_REF  ISPLATA  UPLATA  STANJE
+//   where IZNOS_REF is always 0.00 for card txs (real amount on next line as "X RSD")
+//   and for IPS: iznos_ref=0.00, then isplata or uplata, then stanje
 
 function parseRaiffeisenPDF(rawText) {
-  const dateRe = /^\d{2}\.\d{2}\.\d{4}$/;
-  const numRe  = /^\d[\d,]*\.\d{2}$/;
-  const cardRe = /^\d{3,5}$/;
-
-  const SKIP = [
-    'Datum prijema','Datum transakcije','izvršenja','ref. valuti',
-    'Iznos u','Iznos u orig','Isplata','Uplata','Stanje','Broj kartice','Opis promene',
-    'Za devizne','Za dinarske','važi na dan','Poštovani','prodajni','kupovni kurs',
-    'NIKITA MAKAROV','BULEVAR HEROJA','REON','Raiffeisen banka','Đorđa Stanojevića',
-    '11070 Beograd','Tel:','Fax:','Internet:','http','Datum: ','Izvod broj','Valuta:',
-    'Strana:','Izvod po tekućem','Prethodno stanje','STANJE','Nerealizovani',
-    '11 3202','11073 BEOGRAD','265000000706105590','PAK:',
-  ];
-
-  function skipToken(t) {
-    if (!t) return true;
-    if (SKIP.some(p => t.includes(p))) return true;
-    if (['RSD','Kurs:','Datum','valuti'].includes(t)) return true;
-    if (/^Od \d/.test(t)) return true;
-    if (/^\d{5,}$/.test(t)) return true;          // long account numbers
-    if (/^\d\/\d$/.test(t)) return true;           // page "1/3"
-    if (/^419[,.]983/.test(t)) return true;        // opening balance
-    return false;
-  }
-
   function parseNum(s) {
+    if (!s) return 0;
     try { return parseFloat(s.replace(/,/g,'')) || 0; } catch { return 0; }
   }
 
-  function isExpenseDesc(desc) {
+  // Main transaction line: starts with DATE  DATE  then has 4 numbers at end
+  // Pattern: DD.MM.YYYY  DD.MM.YYYY [anything] N1 N2 N3 N4
+  const txLineRe = /^(\d{2}\.\d{2}\.\d{4})\s+(\d{2}\.\d{2}\.\d{4})\s+(.*?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/;
+
+  const SKIP_LINES = [
+    'NIKITA MAKAROV','Raiffeisen banka','BULEVAR HEROJA','Đ or đ a','11073 BEOGRAD',
+    '11070 Beograd','REON:','Tel:','Fax:','Internet:','http://','Datum:',
+    'Izvod po teku','Izvod broj:','265000000706105590','Valuta: RSD',
+    'Strana: Od','Datum prijema','Datum transakcije','ref. valuti valuti',
+    'Za devizne','Za dinarske','važi na dan','Poštovani','prodajni','kupovni kurs',
+    'STANJE','Nerealizovani','11 3202',
+  ];
+
+  function shouldSkip(line) {
+    if (!line || line.length < 3) return true;
+    if (SKIP_LINES.some(p => line.includes(p))) return true;
+    // Skip pure page/stanje lines like "1/6  381,576.65"
+    if (/^\d+\/\d+\s+[\d,]+\.\d{2}$/.test(line)) return true;
+    return false;
+  }
+
+  function isExpense(desc) {
     const l = desc.toLowerCase();
     return l.includes('zaduženje') || l.includes('zaduzenje') ||
            l.includes('gotovinska isplata') || l.includes('smart atm') ||
-           l.includes('naknada za vodenje');
+           l.includes('naknada za');
   }
 
-  // Tokenize
-  const tokens = rawText.split(/\n+/).map(t=>t.trim()).filter(t=>t && !skipToken(t));
+  function isIncome(desc) {
+    const l = desc.toLowerCase();
+    return l.includes('odobrenje') || l.includes('uplata') || l.includes('plata');
+  }
 
+  const lines = rawText.split('\n').map(l=>l.trim()).filter(Boolean);
   const txs = [];
-  let i = 0;
+  let pendingDesc = ''; // for descriptions that appear on line before the date line
 
-  while (i < tokens.length) {
-    // Find transaction start: two consecutive dates
-    if (!dateRe.test(tokens[i])) { i++; continue; }
-    if (i+1 >= tokens.length || !dateRe.test(tokens[i+1])) { i++; continue; }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (shouldSkip(line)) { pendingDesc = ''; continue; }
 
-    const date1 = tokens[i];
-    i += 2; // skip date2
-
-    // Optional card number
-    if (i < tokens.length && cardRe.test(tokens[i])) i++;
-
-    // Collect description tokens until 3 consecutive numbers appear
-    const descParts = [];
-    while (i < tokens.length) {
-      const tok = tokens[i];
-      if (dateRe.test(tok)) break;
-      // Check if this and next 2 are all numbers → amounts block
-      if (numRe.test(tok) &&
-          i+1 < tokens.length && numRe.test(tokens[i+1]) &&
-          i+2 < tokens.length && numRe.test(tokens[i+2])) break;
-      descParts.push(tok);
-      i++;
+    const m = txLineRe.exec(line);
+    if (!m) {
+      // Not a transaction line — could be pending desc or continuation
+      // Store as pending if it doesn't look like junk
+      if (!/^(Kurs:|Rn:|[\d,]+\.\d{2}\s+RSD|[A-Z]{2,}\s+Kurs:|^\d{9,}|^[A-Z0-9]{10,}-)/i.test(line)
+          && line.length > 2) {
+        pendingDesc = line;
+      } else {
+        pendingDesc = '';
+      }
+      continue;
     }
 
-    // Consume up to 3 numbers: isplata, uplata, stanje
-    const nums = [];
-    while (i < tokens.length && nums.length < 3) {
-      const tok = tokens[i];
-      if (numRe.test(tok)) { nums.push(parseNum(tok)); i++; }
-      else if (dateRe.test(tok)) break;
-      else { i++; }
+    const date1   = m[1];
+    const middle  = m[3].trim();  // card number + desc mixed together
+    const iznos   = parseNum(m[4]); // iznos u ref.valuti (usually 0.00)
+    const isplata = parseNum(m[5]);
+    const uplata  = parseNum(m[6]);
+    // stanje = parseNum(m[7]);
+
+    // Extract description from middle part
+    // middle may start with card number (3-5 digits) followed by desc
+    let desc = middle.replace(/^\d{3,5}\s+/, '').trim();
+
+    // If desc is empty or just zeros, check pending or next lines
+    if (!desc || /^0\.00\s*$/.test(desc)) {
+      if (pendingDesc) {
+        desc = pendingDesc;
+      }
+    } else if (pendingDesc && desc.length < 5) {
+      desc = pendingDesc + ' ' + desc;
     }
-    if (nums.length < 2) continue;
 
-    const isplata = nums[0], uplata = nums[1];
+    // For IPS transfers: collect continuation lines (Rn:, account number, name)
+    // Check if next lines are continuations (not a new tx line)
+    let j = i + 1;
+    const contParts = [];
+    while (j < lines.length) {
+      const next = lines[j];
+      if (txLineRe.test(next)) break;
+      if (/^(\d{2}\.\d{2}\.\d{4})/.test(next)) break;
+      if (/^(Kurs:|[\d,]+\.\d{2}\s*RSD?$|[A-Z]{2,5}\s+Kurs:|SRB\s+(BEOGRAD|NOVI))/i.test(next)) { j++; break; }
+      if (/^\d{15,}-/.test(next)) { j++; continue; } // skip account numbers
+      if (next === 'Rn:') { j++; continue; }
+      if (next.length > 2 && !/^\d+$/.test(next)) contParts.push(next);
+      j++;
+      if (contParts.length >= 2) break;
+    }
+    if (contParts.length > 0 && desc.length < 20) {
+      desc = desc + ' ' + contParts.join(' ');
+    }
 
-    // Clean description
-    let desc = descParts.join(' ')
-      .replace(/\d[\d,]*\.\d{2}\s*RSD\b/g, '')
+    // Clean up description
+    desc = desc
       .replace(/\b0\.00\b/g, '')
-      .replace(/^Rn:\s*/, '')
       .replace(/\s+/g, ' ')
       .trim();
-    if (!desc || desc.length < 3) continue;
 
-    // Determine amount direction
+    if (!desc || desc.length < 3) { pendingDesc = ''; continue; }
+
+    // Determine amount
+    // In this PDF: isplata (col 5) = expense, uplata (col 6) = income
     let amount = 0;
     if (isplata > 0 && uplata === 0) {
       amount = -isplata;
     } else if (uplata > 0 && isplata === 0) {
-      amount = isExpenseDesc(desc) ? -uplata : uplata;
+      // IPS income or expense depending on desc
+      amount = isExpense(desc) ? -uplata : uplata;
     } else if (isplata > 0 && uplata > 0) {
-      amount = isExpenseDesc(desc) ? -isplata : uplata;
+      amount = isExpense(desc) ? -isplata : uplata;
     }
-    if (amount === 0) continue;
+
+    // Fallback: use iznos if amount still 0
+    if (amount === 0 && iznos > 0) {
+      amount = isExpense(desc) ? -iznos : iznos;
+    }
+
+    if (amount === 0) { pendingDesc = ''; continue; }
 
     txs.push({
       id: Math.random().toString(36).slice(2),
@@ -165,11 +207,14 @@ function parseRaiffeisenPDF(rawText) {
       category: categorize(desc),
       type: amount < 0 ? "expense" : "income",
     });
+
+    pendingDesc = '';
   }
+
   return txs;
 }
 
-// ─── CSV fallback ────────────────────────────────────────────────────────────
+// ─── CSV fallback ─────────────────────────────────────────────────────────────
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/).filter(l=>l.trim());
   const txs = [];
@@ -194,59 +239,40 @@ function parseCSV(text) {
   return txs;
 }
 
-// ─── Storage ─────────────────────────────────────────────────────────────────
+// ─── Storage ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "rb_budget_v2";
 const MORTGAGE_KEY = "rb_mortgage_v2";
+function loadTxs(){try{const r=localStorage.getItem(STORAGE_KEY);return r?JSON.parse(r):[]}catch{return[]}}
+function saveTxs(t){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(t))}catch{}}
+function loadMortgage(){try{const r=localStorage.getItem(MORTGAGE_KEY);return r?JSON.parse(r):{enabled:false,balance:50000,rate:4.5,payment:600,extraMonthly:0,currency:"EUR",notes:""}}catch{return{enabled:false,balance:50000,rate:4.5,payment:600,extraMonthly:0,currency:"EUR",notes:""}}}
+function saveMortgage(m){try{localStorage.setItem(MORTGAGE_KEY,JSON.stringify(m))}catch{}}
 
-function loadTxs() {
-  try { const r=localStorage.getItem(STORAGE_KEY); return r?JSON.parse(r):[]; } catch { return []; }
-}
-function saveTxs(txs) {
-  try { localStorage.setItem(STORAGE_KEY,JSON.stringify(txs)); } catch {}
-}
-function loadMortgage() {
-  try { const r=localStorage.getItem(MORTGAGE_KEY); return r?JSON.parse(r):{enabled:false,balance:50000,rate:4.5,payment:600,extraMonthly:0,currency:"EUR",notes:""}; }
-  catch { return {enabled:false,balance:50000,rate:4.5,payment:600,extraMonthly:0,currency:"EUR",notes:""}; }
-}
-function saveMortgage(m) { try { localStorage.setItem(MORTGAGE_KEY,JSON.stringify(m)); } catch {} }
-
-// ─── AI context ───────────────────────────────────────────────────────────────
-function buildContext(transactions, mortgage) {
-  let ctx = "";
-  if (transactions.length) {
-    const byCat={}, byMonth={};
-    let totalIn=0, totalEx=0;
-    for (const t of transactions) {
+function buildContext(transactions,mortgage){
+  let ctx="";
+  if(transactions.length){
+    const byCat={},byMonth={};let totalIn=0,totalEx=0;
+    for(const t of transactions){
       byCat[t.category]=(byCat[t.category]||0)+t.amount;
-      const p=t.date.split(".");
-      const m=p.length===3?`${p[2]}-${p[1]}`:t.date.slice(0,7);
+      const p=t.date.split(".");const m=p.length===3?`${p[2]}-${p[1]}`:t.date.slice(0,7);
       if(!byMonth[m])byMonth[m]={income:0,expense:0};
       if(t.type==="income"){byMonth[m].income+=t.amount;totalIn+=t.amount;}
       else{byMonth[m].expense+=Math.abs(t.amount);totalEx+=Math.abs(t.amount);}
     }
     ctx+=`TRANSACTIONS (${transactions.length} total):\nTotal income: ${totalIn.toFixed(0)} RSD\nTotal expenses: ${totalEx.toFixed(0)} RSD\nBalance: ${(totalIn-totalEx).toFixed(0)} RSD\n\nBY CATEGORY:\n`;
     ctx+=Object.entries(byCat).sort((a,b)=>a[1]-b[1]).map(([c,v])=>`${c}: ${v.toFixed(0)} RSD`).join("\n");
-    ctx+="\n\nBY MONTH:\n"+Object.entries(byMonth).sort().map(([m,v])=>`${m}: income ${v.income.toFixed(0)}, expenses ${v.expense.toFixed(0)}`).join("\n")+"\n\n";
-  } else { ctx+="No transaction data loaded.\n\n"; }
-  if (mortgage.enabled) {
-    const r=mortgage.rate/100/12, months=calcSchedule(mortgage.balance,mortgage.rate,mortgage.payment).length;
-    const totalInt=calcSchedule(mortgage.balance,mortgage.rate,mortgage.payment).reduce((s,r)=>s+r.interest,0);
-    ctx+=`MORTGAGE:\nBalance: ${mortgage.balance.toLocaleString()} ${mortgage.currency}\nRate: ${mortgage.rate}% annual\nPayment: ${mortgage.payment.toLocaleString()} ${mortgage.currency}/month\nMonths remaining: ~${months} (${(months/12).toFixed(1)} years)\nTotal interest: ~${totalInt.toFixed(0)} ${mortgage.currency}\n`;
+    ctx+="\n\nBY MONTH:\n"+Object.entries(byMonth).sort().map(([m,v])=>`${m}: income ${v.income.toFixed(0)}, expenses ${v.expense.toFixed(0)}`).join("\n")+"\n";
+  }else{ctx+="No transaction data loaded.\n";}
+  if(mortgage.enabled){
+    const sch=calcSchedule(mortgage.balance,mortgage.rate,mortgage.payment);
+    const totalInt=sch.reduce((s,r)=>s+r.interest,0);
+    ctx+=`\nMORTGAGE:\nBalance: ${mortgage.balance.toLocaleString()} ${mortgage.currency}\nRate: ${mortgage.rate}%\nPayment: ${mortgage.payment.toLocaleString()} ${mortgage.currency}/mo\nMonths left: ~${sch.length} (${(sch.length/12).toFixed(1)} yrs)\nTotal interest: ~${totalInt.toFixed(0)} ${mortgage.currency}\n`;
   }
   return ctx;
 }
 
-function calcSchedule(balance,annualRate,payment,extraMonthly=0,extraOneTime=0) {
-  const rate=annualRate/100/12;
-  const rows=[]; let bal=balance-extraOneTime, month=0;
-  while(bal>0.01&&month<600){
-    month++;
-    const interest=bal*rate, principal=(payment+extraMonthly)-interest;
-    if(principal<=0)break;
-    bal=Math.max(0,bal-principal);
-    rows.push({month,interest:+interest.toFixed(2),principal:+principal.toFixed(2),balance:+bal.toFixed(2)});
-    if(bal<0.01)break;
-  }
+function calcSchedule(balance,annualRate,payment,extra=0,extraOne=0){
+  const rate=annualRate/100/12;const rows=[];let bal=balance-extraOne,mo=0;
+  while(bal>0.01&&mo<600){mo++;const i=bal*rate,p=(payment+extra)-i;if(p<=0)break;bal=Math.max(0,bal-p);rows.push({month:mo,interest:+i.toFixed(2),principal:+p.toFixed(2),balance:+bal.toFixed(2)});if(bal<0.01)break;}
   return rows;
 }
 
@@ -305,17 +331,17 @@ function Field({label,value,onChange,type="number",placeholder="",suffix="",styl
 
 function MortgagePanel({mortgage,setMortgage}){
   const [extraOne,setExtraOne]=useState(0);
-  const schedule=calcSchedule(mortgage.balance,mortgage.rate,mortgage.payment,mortgage.extraMonthly,extraOne);
-  const scheduleBase=calcSchedule(mortgage.balance,mortgage.rate,mortgage.payment,0,0);
-  const totalInt=schedule.reduce((s,r)=>s+r.interest,0);
-  const savedMonths=scheduleBase.length-schedule.length;
-  const savedInterest=scheduleBase.reduce((s,r)=>s+r.interest,0)-totalInt;
-  const payoffDate=(()=>{const d=new Date();d.setMonth(d.getMonth()+schedule.length);return d.toLocaleDateString("en-GB",{month:"long",year:"numeric"});})();
-  const chartPoints=[];
-  for(let i=0;i<schedule.length;i+=Math.max(1,Math.floor(schedule.length/24)))chartPoints.push({x:i,y:schedule[i].balance});
-  chartPoints.push({x:schedule.length,y:0});
-  const chartW=280,chartH=80;
-  const pts=chartPoints.map(p=>`${(p.x/schedule.length)*chartW},${chartH-(p.y/mortgage.balance)*chartH}`).join(" ");
+  const sch=calcSchedule(mortgage.balance,mortgage.rate,mortgage.payment,mortgage.extraMonthly,extraOne);
+  const schBase=calcSchedule(mortgage.balance,mortgage.rate,mortgage.payment,0,0);
+  const totalInt=sch.reduce((s,r)=>s+r.interest,0);
+  const savedMo=schBase.length-sch.length;
+  const savedInt=schBase.reduce((s,r)=>s+r.interest,0)-totalInt;
+  const payoffDate=(()=>{const d=new Date();d.setMonth(d.getMonth()+sch.length);return d.toLocaleDateString("en-GB",{month:"long",year:"numeric"});})();
+  const chartPts=[];
+  for(let i=0;i<sch.length;i+=Math.max(1,Math.floor(sch.length/24)))chartPts.push({x:i,y:sch[i].balance});
+  chartPts.push({x:sch.length,y:0});
+  const W=280,H=80;
+  const pts=chartPts.map(p=>`${(p.x/sch.length)*W},${H-(p.y/mortgage.balance)*H}`).join(" ");
   return <div style={{display:"flex",flexDirection:"column",gap:16}}>
     <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
       <div style={{fontSize:13,fontWeight:600,marginBottom:14}}>⚙️ Mortgage parameters</div>
@@ -331,18 +357,16 @@ function MortgagePanel({mortgage,setMortgage}){
           </select>
         </div>
         <Field label="Extra / month" value={mortgage.extraMonthly} onChange={e=>setMortgage(m=>({...m,extraMonthly:+e.target.value}))} suffix={mortgage.currency}/>
-        <Field label="One-time extra payment" value={extraOne} onChange={e=>setExtraOne(+e.target.value)} suffix={mortgage.currency}/>
+        <Field label="One-time extra" value={extraOne} onChange={e=>setExtraOne(+e.target.value)} suffix={mortgage.currency}/>
       </div>
-      <div style={{marginTop:12}}>
-        <Field label="Notes" value={mortgage.notes} onChange={e=>setMortgage(m=>({...m,notes:e.target.value}))} type="text" placeholder="Raiffeisen, fixed rate..."/>
-      </div>
+      <div style={{marginTop:12}}><Field label="Notes" value={mortgage.notes} onChange={e=>setMortgage(m=>({...m,notes:e.target.value}))} type="text" placeholder="Raiffeisen, fixed rate..."/></div>
     </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:12}}>
       {[
         {label:"Payoff date",value:payoffDate,color:C.accent},
-        {label:"Months remaining",value:`${schedule.length} mo.`,color:C.text},
+        {label:"Months remaining",value:`${sch.length} mo.`,color:C.text},
         {label:"Total interest",value:`${fmt(totalInt)} ${mortgage.currency}`,color:C.red},
-        {label:"Savings (early repay)",value:savedMonths>0?`${savedMonths} mo. / ${fmt(savedInterest)} ${mortgage.currency}`:"No extra payments",color:C.green},
+        {label:"Savings (early)",value:savedMo>0?`${savedMo} mo. / ${fmt(savedInt)} ${mortgage.currency}`:"No extra payments",color:C.green},
       ].map(k=>(
         <div key={k.label} style={{background:C.card,borderRadius:12,padding:14,border:`1px solid ${C.border}`}}>
           <div style={{fontSize:11,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:0.4}}>{k.label}</div>
@@ -352,9 +376,9 @@ function MortgagePanel({mortgage,setMortgage}){
     </div>
     <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
       <div style={{fontSize:13,fontWeight:600,marginBottom:12}}>📉 Balance over time</div>
-      <svg width="100%" viewBox={`0 0 ${chartW} ${chartH+10}`} style={{overflow:"visible"}}>
+      <svg width="100%" viewBox={`0 0 ${W} ${H+10}`} style={{overflow:"visible"}}>
         <defs><linearGradient id="grad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.accent} stopOpacity="0.3"/><stop offset="100%" stopColor={C.accent} stopOpacity="0"/></linearGradient></defs>
-        <polygon points={`0,${chartH} ${pts} ${chartW},${chartH}`} fill="url(#grad)"/>
+        <polygon points={`0,${H} ${pts} ${W},${H}`} fill="url(#grad)"/>
         <polyline points={pts} fill="none" stroke={C.accent} strokeWidth="2"/>
       </svg>
       <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.muted,marginTop:4}}>
@@ -363,12 +387,12 @@ function MortgagePanel({mortgage,setMortgage}){
       </div>
     </div>
     <div style={{background:C.card,borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
-      <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:600}}>Amortisation schedule (first 24 months)</div>
+      <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:600}}>Schedule (first 24 months)</div>
       <div style={{overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
           <thead><tr style={{background:C.bg}}>{["Mo.","Payment","Interest","Principal","Balance"].map(h=><th key={h} style={{padding:"8px 12px",color:C.muted,textAlign:"right",fontWeight:500,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
           <tbody>
-            {schedule.slice(0,24).map((r,i)=>(
+            {sch.slice(0,24).map((r,i)=>(
               <tr key={r.month} style={{borderTop:`1px solid ${C.border}`,background:i%2===0?"transparent":C.surface}}>
                 <td style={{padding:"7px 12px",color:C.muted,textAlign:"right"}}>{r.month}</td>
                 <td style={{padding:"7px 12px",color:C.text,textAlign:"right"}}>{fmt(mortgage.payment+mortgage.extraMonthly)}</td>
@@ -380,16 +404,15 @@ function MortgagePanel({mortgage,setMortgage}){
           </tbody>
         </table>
       </div>
-      {schedule.length>24&&<div style={{padding:"10px 16px",fontSize:12,color:C.muted,borderTop:`1px solid ${C.border}`}}>... {schedule.length-24} more payments remaining</div>}
+      {sch.length>24&&<div style={{padding:"10px 16px",fontSize:12,color:C.muted,borderTop:`1px solid ${C.border}`}}>{sch.length-24} more payments remaining</div>}
     </div>
   </div>;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-function App() {
+function App(){
   const [tab,setTab]=useState("upload");
   const [transactions,setTransactions]=useState(()=>loadTxs());
-  const [messages,setMessages]=useState([{role:"assistant",content:"Hello! 👋 I'm your personal finance assistant.\n\nUpload a Raiffeisen Serbia PDF statement and I'll categorise your transactions, forecast spending, and help plan your savings and mortgage payoff."}]);
+  const [messages,setMessages]=useState([{role:"assistant",content:"Hello! 👋 I'm your personal finance assistant.\n\nUpload a Raiffeisen Serbia PDF statement — I'll categorise your transactions, analyse spending, and help with savings and mortgage planning."}]);
   const [chatInput,setChatInput]=useState("");
   const [loading,setLoading]=useState(false);
   const [pdfLoading,setPdfLoading]=useState(false);
@@ -397,29 +420,28 @@ function App() {
   const [txFilter,setTxFilter]=useState("all");
   const [mortgage,setMortgage]=useState(()=>loadMortgage());
   const [parseLog,setParseLog]=useState("");
-  const [showClearConfirm,setShowClearConfirm]=useState(false);
+  const [showClear,setShowClear]=useState(false);
   const chatEndRef=useRef(null);
   const fileRef=useRef(null);
 
-  useEffect(()=>{ saveTxs(transactions); },[transactions]);
-  useEffect(()=>{ saveMortgage(mortgage); },[mortgage]);
-  useEffect(()=>{ chatEndRef.current?.scrollIntoView({behavior:"smooth"}); },[messages]);
-  useEffect(()=>{ if(transactions.length>0) setTab("overview"); },[]);
+  useEffect(()=>{saveTxs(transactions);},[transactions]);
+  useEffect(()=>{saveMortgage(mortgage);},[mortgage]);
+  useEffect(()=>{chatEndRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
+  useEffect(()=>{if(transactions.length>0)setTab("overview");},[]);
 
-  const loadPdfJs=useCallback(()=>new Promise((resolve,reject)=>{
-    if(window.pdfjsLib){resolve(window.pdfjsLib);return;}
+  const loadPdfJs=useCallback(()=>new Promise((res,rej)=>{
+    if(window.pdfjsLib){res(window.pdfjsLib);return;}
     const s=document.createElement("script");
     s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-    s.onload=()=>{window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";resolve(window.pdfjsLib);};
-    s.onerror=reject;
-    document.head.appendChild(s);
+    s.onload=()=>{window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";res(window.pdfjsLib);};
+    s.onerror=rej;document.head.appendChild(s);
   }),[]);
 
   const extractPdfText=useCallback(async(file)=>{
-    const pdfjsLib=await loadPdfJs();
+    const lib=await loadPdfJs();
     const buf=await file.arrayBuffer();
-    const pdf=await pdfjsLib.getDocument({data:buf}).promise;
-    let fullText="";
+    const pdf=await lib.getDocument({data:buf}).promise;
+    let text="";
     for(let p=1;p<=pdf.numPages;p++){
       const page=await pdf.getPage(p);
       const content=await page.getTextContent();
@@ -432,19 +454,16 @@ function App() {
       const ys=Object.keys(byY).map(Number).sort((a,b)=>b-a);
       for(const y of ys){
         const line=byY[y].sort((a,b)=>a.x-b.x).map(i=>i.str).join(" ").trim();
-        if(line) fullText+=line+"\n";
+        if(line)text+=line+"\n";
       }
-      fullText+="\n";
+      text+="\n";
     }
-    return fullText;
+    return text;
   },[loadPdfJs]);
 
   const processText=useCallback((text,isPdf=false)=>{
     const parsed=isPdf?parseRaiffeisenPDF(text):parseCSV(text);
-    if(!parsed.length){
-      setParseLog("⚠️ Could not recognise any transactions. Check the file format.");
-      return;
-    }
+    if(!parsed.length){setParseLog("⚠️ Could not recognise any transactions. Check the file format.");return;}
     setTransactions(prev=>{
       const existing=new Set(prev.map(t=>`${t.date}|${t.description}|${t.amount}`));
       const newTxs=parsed.filter(t=>!existing.has(`${t.date}|${t.description}|${t.amount}`));
@@ -457,58 +476,34 @@ function App() {
   },[]);
 
   const handleFile=useCallback(async(file)=>{
-    const isPdf=file.name.toLowerCase().endsWith(".pdf");
-    if(isPdf){
-      setPdfLoading(true);
-      setParseLog("📄 Reading PDF...");
-      try{
-        const text=await extractPdfText(file);
-        processText(text,true);
-      }catch(e){
-        setParseLog("⚠️ PDF error: "+e.message);
-      }finally{setPdfLoading(false);}
+    if(file.name.toLowerCase().endsWith(".pdf")){
+      setPdfLoading(true);setParseLog("📄 Reading PDF...");
+      try{const t=await extractPdfText(file);processText(t,true);}
+      catch(e){setParseLog("⚠️ PDF error: "+e.message);}
+      finally{setPdfLoading(false);}
     }else{
-      const r=new FileReader();
-      r.onload=e=>processText(e.target.result,false);
-      r.readAsText(file,"UTF-8");
+      const r=new FileReader();r.onload=e=>processText(e.target.result,false);r.readAsText(file,"UTF-8");
     }
   },[extractPdfText,processText]);
 
   const clearAll=()=>{
-    setTransactions([]);
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(MORTGAGE_KEY);
-    setParseLog("🗑️ All data cleared");
-    setShowClearConfirm(false);
-    setTab("upload");
+    setTransactions([]);localStorage.removeItem(STORAGE_KEY);
+    setParseLog("🗑️ All data cleared");setShowClear(false);setTab("upload");
   };
 
   const sendMessage=async()=>{
     if(!chatInput.trim()||loading)return;
     const userMsg={role:"user",content:chatInput.trim()};
-    setChatInput("");
-    setMessages(prev=>[...prev,userMsg]);
-    setLoading(true);
-    const ctx=buildContext(transactions,mortgage);
-    const sys=`You are an expert personal finance advisor for a user living in Belgrade, Serbia. Reply in Russian language.
-
-User financial data:
-${ctx}
-
-Be specific, use actual numbers. Keep answers concise with emoji. Currency is RSD (Serbian dinar), mortgage may be in EUR.`;
-    const history=messages.slice(-10).map(m=>({role:m.role,content:m.content}));
-    history.push(userMsg);
+    setChatInput("");setMessages(prev=>[...prev,userMsg]);setLoading(true);
+    const sys=`You are an expert personal finance advisor for a user in Belgrade, Serbia. Reply in Russian language.\n\n${buildContext(transactions,mortgage)}\n\nBe specific with numbers. Short answers, use emoji. Currency: RSD.`;
+    const history=messages.slice(-10).map(m=>({role:m.role,content:m.content}));history.push(userMsg);
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:history}),
-      });
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:history})});
       const data=await res.json();
-      const reply=data.content?.map(b=>b.text||"").join("")||"Error getting response.";
-      setMessages(prev=>[...prev,{role:"assistant",content:reply}]);
-    }catch{
-      setMessages(prev=>[...prev,{role:"assistant",content:"⚠️ API error. Check your connection."}]);
-    }finally{setLoading(false);}
+      setMessages(prev=>[...prev,{role:"assistant",content:data.content?.map(b=>b.text||"").join("")||"Error."}]);
+    }catch{setMessages(prev=>[...prev,{role:"assistant",content:"⚠️ API error."}]);}
+    finally{setLoading(false);}
   };
 
   const income=transactions.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
@@ -521,12 +516,7 @@ Be specific, use actual numbers. Keep answers concise with emoji. Currency is RS
   const dates=transactions.map(t=>t.date).filter(Boolean).sort();
   const dateRange=dates.length>1?`${dates[0]} — ${dates[dates.length-1]}`:"";
 
-  const TABS=[
-    {id:"upload",label:"+ Add"},
-    {id:"overview",label:"Overview",disabled:!transactions.length},
-    {id:"mortgage",label:"Mortgage"},
-    {id:"chat",label:"AI Chat"},
-  ];
+  const TABS=[{id:"upload",label:"+ Add"},{id:"overview",label:"Overview",disabled:!transactions.length},{id:"mortgage",label:"Mortgage"},{id:"chat",label:"AI Chat"}];
 
   return <div style={{background:C.bg,minHeight:"100vh",fontFamily:"'Inter','SF Pro Display',system-ui,sans-serif",color:C.text}}>
     <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
@@ -534,48 +524,28 @@ Be specific, use actual numbers. Keep answers concise with emoji. Currency is RS
         <div style={{width:32,height:32,borderRadius:8,background:`linear-gradient(135deg,${C.accent},#8B5CF6)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>💎</div>
         <div>
           <div style={{fontSize:15,fontWeight:700,letterSpacing:-0.3}}>Family Budget AI</div>
-          <div style={{fontSize:10,color:C.muted,letterSpacing:0.4,textTransform:"uppercase"}}>
-            {transactions.length>0?`${transactions.length} transactions · saved`:"Raiffeisen Serbia"}
-          </div>
+          <div style={{fontSize:10,color:C.muted,letterSpacing:0.4,textTransform:"uppercase"}}>{transactions.length>0?`${transactions.length} transactions · saved`:"Raiffeisen Serbia"}</div>
         </div>
       </div>
-      {transactions.length>0&&(
-        <button onClick={()=>setShowClearConfirm(true)}
-          style={{background:"none",border:`1px solid ${C.red}66`,color:C.red,fontSize:11,padding:"4px 10px",borderRadius:20,cursor:"pointer"}}>
-          🗑️ Clear all
-        </button>
-      )}
+      {transactions.length>0&&<button onClick={()=>setShowClear(true)} style={{background:"none",border:`1px solid ${C.red}66`,color:C.red,fontSize:11,padding:"4px 10px",borderRadius:20,cursor:"pointer"}}>🗑️ Clear all</button>}
     </div>
 
-    {showClearConfirm&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+    {showClear&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{background:C.card,borderRadius:16,padding:24,border:`1px solid ${C.border}`,maxWidth:320,width:"100%"}}>
         <div style={{fontSize:24,marginBottom:10,textAlign:"center"}}>🗑️</div>
         <div style={{fontSize:15,fontWeight:600,marginBottom:8,textAlign:"center"}}>Delete all data?</div>
-        <div style={{fontSize:13,color:C.muted,marginBottom:20,textAlign:"center",lineHeight:1.5}}>
-          This will permanently delete all {transactions.length} transactions. This cannot be undone.
-        </div>
+        <div style={{fontSize:13,color:C.muted,marginBottom:20,textAlign:"center",lineHeight:1.5}}>This will permanently delete all {transactions.length} transactions.</div>
         <div style={{display:"flex",gap:10}}>
-          <button onClick={()=>setShowClearConfirm(false)}
-            style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,color:C.text,borderRadius:10,padding:"10px",fontSize:14,cursor:"pointer"}}>
-            Cancel
-          </button>
-          <button onClick={clearAll}
-            style={{flex:1,background:C.red,border:"none",color:"#fff",borderRadius:10,padding:"10px",fontSize:14,fontWeight:600,cursor:"pointer"}}>
-            Delete all
-          </button>
+          <button onClick={()=>setShowClear(false)} style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,color:C.text,borderRadius:10,padding:"10px",fontSize:14,cursor:"pointer"}}>Cancel</button>
+          <button onClick={clearAll} style={{flex:1,background:C.red,border:"none",color:"#fff",borderRadius:10,padding:"10px",fontSize:14,fontWeight:600,cursor:"pointer"}}>Delete all</button>
         </div>
       </div>
     </div>}
 
     <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,display:"flex",padding:"0 20px",overflowX:"auto"}}>
-      {TABS.map(t=>(
-        <button key={t.id} onClick={()=>!t.disabled&&setTab(t.id)}
-          style={{background:"none",border:"none",padding:"12px 16px",cursor:t.disabled?"default":"pointer",
-            color:tab===t.id?C.accent:t.disabled?C.dimmed:C.muted,fontSize:13,fontWeight:tab===t.id?600:400,
-            borderBottom:tab===t.id?`2px solid ${C.accent}`:"2px solid transparent",marginBottom:-1,transition:"color 0.2s",whiteSpace:"nowrap"}}>
-          {t.label}
-        </button>
-      ))}
+      {TABS.map(t=><button key={t.id} onClick={()=>!t.disabled&&setTab(t.id)}
+        style={{background:"none",border:"none",padding:"12px 16px",cursor:t.disabled?"default":"pointer",color:tab===t.id?C.accent:t.disabled?C.dimmed:C.muted,fontSize:13,fontWeight:tab===t.id?600:400,borderBottom:tab===t.id?`2px solid ${C.accent}`:"2px solid transparent",marginBottom:-1,transition:"color 0.2s",whiteSpace:"nowrap"}}>
+        {t.label}</button>)}
     </div>
 
     <div style={{maxWidth:800,margin:"0 auto",padding:"20px 16px"}}>
@@ -583,68 +553,40 @@ Be specific, use actual numbers. Keep answers concise with emoji. Currency is RS
       {tab==="upload"&&<div style={{display:"flex",flexDirection:"column",gap:16}}>
         {transactions.length>0&&<div style={{background:C.greenSoft,border:`1px solid ${C.green}44`,borderRadius:12,padding:14,display:"flex",alignItems:"center",gap:10}}>
           <span style={{fontSize:20}}>💾</span>
-          <div>
-            <div style={{fontSize:13,fontWeight:600,color:C.green}}>Data saved on this device</div>
-            <div style={{fontSize:12,color:C.muted,marginTop:2}}>{transactions.length} transactions · {dateRange}</div>
-          </div>
+          <div><div style={{fontSize:13,fontWeight:600,color:C.green}}>Data saved on this device</div>
+          <div style={{fontSize:12,color:C.muted,marginTop:2}}>{transactions.length} transactions · {dateRange}</div></div>
         </div>}
-
         <div onClick={()=>!pdfLoading&&fileRef.current?.click()}
           style={{border:`2px dashed ${pdfLoading?C.accent:C.border}`,borderRadius:16,padding:"36px 24px",textAlign:"center",background:pdfLoading?C.accentSoft:C.card,cursor:pdfLoading?"default":"pointer",transition:"all 0.3s"}}>
-          <input ref={fileRef} type="file" accept=".pdf,.csv,.txt" style={{display:"none"}}
-            onChange={e=>{const f=e.target.files[0];if(f)handleFile(f);e.target.value="";}}/>
+          <input ref={fileRef} type="file" accept=".pdf,.csv,.txt" style={{display:"none"}} onChange={e=>{const f=e.target.files[0];if(f)handleFile(f);e.target.value="";}}/>
           <div style={{fontSize:40,marginBottom:12}}>{pdfLoading?"⏳":"📄"}</div>
-          <div style={{fontSize:15,fontWeight:600,marginBottom:6}}>
-            {pdfLoading?"Reading PDF...":transactions.length>0?"Add another statement":"Upload Raiffeisen statement"}
-          </div>
+          <div style={{fontSize:15,fontWeight:600,marginBottom:6}}>{pdfLoading?"Reading PDF...":transactions.length>0?"Add another statement":"Upload Raiffeisen statement"}</div>
           <div style={{fontSize:13,color:C.muted,marginBottom:12}}>PDF or CSV from raiffeisenbank.rs</div>
           <div style={{display:"flex",justifyContent:"center",gap:8}}>
             {["PDF","CSV"].map(f=><span key={f} style={{background:C.accentSoft,color:C.accent,fontSize:11,padding:"3px 10px",borderRadius:20,border:`1px solid ${C.accent}44`}}>{f}</span>)}
           </div>
         </div>
-
-        {parseLog&&<div style={{padding:"10px 14px",borderRadius:8,
-          background:parseLog.startsWith("✅")?C.greenSoft:parseLog.startsWith("🗑️")?C.redSoft:C.amberSoft,
-          border:`1px solid ${parseLog.startsWith("✅")?C.green:parseLog.startsWith("🗑️")?C.red:C.amber}44`,
-          fontSize:13,color:parseLog.startsWith("✅")?C.green:parseLog.startsWith("🗑️")?C.red:C.amber}}>
-          {parseLog}
-        </div>}
-
+        {parseLog&&<div style={{padding:"10px 14px",borderRadius:8,background:parseLog.startsWith("✅")?C.greenSoft:parseLog.startsWith("🗑️")?C.redSoft:C.amberSoft,border:`1px solid ${parseLog.startsWith("✅")?C.green:parseLog.startsWith("🗑️")?C.red:C.amber}44`,fontSize:13,color:parseLog.startsWith("✅")?C.green:parseLog.startsWith("🗑️")?C.red:C.amber}}>{parseLog}</div>}
         <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
           <div style={{fontSize:12,color:C.muted,marginBottom:12,textTransform:"uppercase",letterSpacing:0.5}}>How to download from Raiffeisen Serbia</div>
-          {[
-            {n:"1",t:"raiffeisenbank.rs → Internet bankarstvo → login"},
-            {n:"2",t:"Moj račun → Izvodi i transakcije → select account"},
-            {n:"3",t:"Choose period → Preuzmi izvod → PDF"},
-            {n:"4",t:"Upload above — new data merges with existing (duplicates skipped)"},
-          ].map(s=>(
+          {[{n:"1",t:"raiffeisenbank.rs → Internet bankarstvo → login"},{n:"2",t:"Moj račun → Izvodi i transakcije → select account"},{n:"3",t:"Choose period → Preuzmi izvod → PDF"},{n:"4",t:"Upload above — new data merges, duplicates skipped"},].map(s=>(
             <div key={s.n} style={{display:"flex",gap:10,marginBottom:10,alignItems:"flex-start"}}>
               <div style={{width:22,height:22,borderRadius:"50%",background:C.accentSoft,border:`1px solid ${C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:C.accent,flexShrink:0,marginTop:1}}>{s.n}</div>
               <div style={{fontSize:13,color:C.text,lineHeight:1.5}}>{s.t}</div>
             </div>
           ))}
         </div>
-
         <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`}}>
           <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>Or paste CSV manually</div>
-          <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)}
-            placeholder={"01.06.2025;Maxi supermarket;1850;0;98150;RSD\n05.06.2025;Car Go taksi;450;0;97700;RSD"}
-            style={{width:"100%",height:90,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",color:C.text,fontFamily:"monospace",fontSize:12,resize:"vertical",outline:"none",boxSizing:"border-box"}}/>
-          <button onClick={()=>{if(pasteText.trim())processText(pasteText,false);}}
-            style={{marginTop:10,background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"9px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-            Add →
-          </button>
+          <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} placeholder={"01.06.2025;Maxi supermarket;1850;0;98150;RSD"} style={{width:"100%",height:80,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",color:C.text,fontFamily:"monospace",fontSize:12,resize:"vertical",outline:"none",boxSizing:"border-box"}}/>
+          <button onClick={()=>{if(pasteText.trim())processText(pasteText,false);}} style={{marginTop:10,background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"9px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>Add →</button>
         </div>
       </div>}
 
       {tab==="overview"&&transactions.length>0&&<div style={{display:"flex",flexDirection:"column",gap:16}}>
         {dateRange&&<div style={{fontSize:12,color:C.muted,textAlign:"center"}}>📅 {dateRange}</div>}
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
-          {[
-            {label:"Income",value:income,color:C.green,bg:C.greenSoft,pre:"+"},
-            {label:"Expenses",value:expense,color:C.red,bg:C.redSoft,pre:"-"},
-            {label:"Balance",value:balance,color:balance>=0?C.green:C.red,bg:balance>=0?C.greenSoft:C.redSoft,pre:balance>=0?"+":""},
-          ].map(k=>(
+          {[{label:"Income",value:income,color:C.green,bg:C.greenSoft,pre:"+"},{label:"Expenses",value:expense,color:C.red,bg:C.redSoft,pre:"-"},{label:"Balance",value:balance,color:balance>=0?C.green:C.red,bg:balance>=0?C.greenSoft:C.redSoft,pre:balance>=0?"+":""},].map(k=>(
             <div key={k.label} style={{background:k.bg,border:`1px solid ${k.color}33`,borderRadius:12,padding:14}}>
               <div style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{k.label}</div>
               <div style={{fontSize:16,fontWeight:700,color:k.color}}>{k.pre}{fmt(Math.abs(k.value))}</div>
@@ -657,57 +599,40 @@ Be specific, use actual numbers. Keep answers concise with emoji. Currency is RS
         </div>}
         <div style={{background:C.accentSoft,borderRadius:12,padding:14,border:`1px solid ${C.accent}33`,display:"flex",gap:10,alignItems:"flex-start"}}>
           <span style={{fontSize:20}}>💡</span>
-          <div>
-            <div style={{fontSize:13,fontWeight:600,color:C.accent,marginBottom:4}}>50/30/20 rule</div>
-            <div style={{fontSize:12,color:C.muted,lineHeight:1.5}}>
-              Needs: <b style={{color:C.text}}>{fmt(income*0.5)}</b> · Wants: <b style={{color:C.text}}>{fmt(income*0.3)}</b> · Savings: <b style={{color:C.green}}>{fmt(income*0.2)}</b>
-            </div>
-          </div>
+          <div><div style={{fontSize:13,fontWeight:600,color:C.accent,marginBottom:4}}>50/30/20 rule</div>
+          <div style={{fontSize:12,color:C.muted,lineHeight:1.5}}>Needs: <b style={{color:C.text}}>{fmt(income*0.5)}</b> · Wants: <b style={{color:C.text}}>{fmt(income*0.3)}</b> · Savings: <b style={{color:C.green}}>{fmt(income*0.2)}</b></div></div>
         </div>
         <div style={{background:C.card,borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
           <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
             <div style={{fontSize:13,fontWeight:600}}>Transactions ({filtered.length})</div>
             <div style={{display:"flex",gap:6}}>
               {[["all","All"],["expense","Expenses"],["income","Income"]].map(([v,l])=>(
-                <button key={v} onClick={()=>setTxFilter(v)}
-                  style={{background:txFilter===v?C.accent:"none",border:`1px solid ${txFilter===v?C.accent:C.border}`,color:txFilter===v?"#fff":C.muted,fontSize:11,padding:"3px 10px",borderRadius:20,cursor:"pointer"}}>{l}</button>
+                <button key={v} onClick={()=>setTxFilter(v)} style={{background:txFilter===v?C.accent:"none",border:`1px solid ${txFilter===v?C.accent:C.border}`,color:txFilter===v?"#fff":C.muted,fontSize:11,padding:"3px 10px",borderRadius:20,cursor:"pointer"}}>{l}</button>
               ))}
             </div>
           </div>
           <div style={{maxHeight:350,overflowY:"auto"}}>
-            {filtered.slice().sort((a,b)=>{
-              const da=a.date.split(".").reverse().join(""), db=b.date.split(".").reverse().join("");
-              return db.localeCompare(da);
-            }).slice(0,150).map(t=><TxRow key={t.id} t={t}/>)}
+            {filtered.slice().sort((a,b)=>b.date.split(".").reverse().join("").localeCompare(a.date.split(".").reverse().join(""))).slice(0,150).map(t=><TxRow key={t.id} t={t}/>)}
             {filtered.length>150&&<div style={{padding:"10px",fontSize:12,color:C.muted,textAlign:"center"}}>Showing 150 of {filtered.length}</div>}
           </div>
         </div>
-        <button onClick={()=>setTab("chat")}
-          style={{background:`linear-gradient(135deg,${C.accent},#8B5CF6)`,color:"#fff",border:"none",borderRadius:10,padding:"12px 20px",fontSize:14,fontWeight:600,cursor:"pointer",textAlign:"center"}}>
+        <button onClick={()=>setTab("chat")} style={{background:`linear-gradient(135deg,${C.accent},#8B5CF6)`,color:"#fff",border:"none",borderRadius:10,padding:"12px 20px",fontSize:14,fontWeight:600,cursor:"pointer",textAlign:"center"}}>
           💬 Discuss with AI assistant →
         </button>
       </div>}
 
       {tab==="mortgage"&&<div style={{display:"flex",flexDirection:"column",gap:16}}>
         <div style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div>
-            <div style={{fontSize:14,fontWeight:600}}>🏦 Mortgage calculator</div>
-            <div style={{fontSize:12,color:C.muted,marginTop:2}}>Settings saved automatically</div>
-          </div>
-          <button onClick={()=>setMortgage(m=>({...m,enabled:!m.enabled}))}
-            style={{background:mortgage.enabled?C.green:C.dimmed,border:"none",borderRadius:20,padding:"6px 16px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>
-            {mortgage.enabled?"On":"Off"}
-          </button>
+          <div><div style={{fontSize:14,fontWeight:600}}>🏦 Mortgage calculator</div><div style={{fontSize:12,color:C.muted,marginTop:2}}>Settings saved automatically</div></div>
+          <button onClick={()=>setMortgage(m=>({...m,enabled:!m.enabled}))} style={{background:mortgage.enabled?C.green:C.dimmed,border:"none",borderRadius:20,padding:"6px 16px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>{mortgage.enabled?"On":"Off"}</button>
         </div>
-        {mortgage.enabled?<MortgagePanel mortgage={mortgage} setMortgage={setMortgage}/>
-          :<div style={{textAlign:"center",padding:"40px 20px",color:C.muted,fontSize:14}}>Enable the calculator above</div>}
+        {mortgage.enabled?<MortgagePanel mortgage={mortgage} setMortgage={setMortgage}/>:<div style={{textAlign:"center",padding:"40px 20px",color:C.muted,fontSize:14}}>Enable the calculator above</div>}
       </div>}
 
       {tab==="chat"&&<div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 180px)"}}>
         {messages.length<=1&&<div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
-          {["Where do I spend the most?","How much can I save?","Forecast next month","Savings strategy","When will mortgage be paid off?","Is early repayment worth it?","Analyse my cash withdrawals"].map(q=>(
-            <button key={q} onClick={()=>setChatInput(q)}
-              style={{background:C.card,border:`1px solid ${C.border}`,color:C.muted,fontSize:12,padding:"6px 12px",borderRadius:20,cursor:"pointer"}}>{q}</button>
+          {["Where do I spend the most?","How much can I save?","Forecast next month","Savings strategy","When will mortgage be paid off?","Is early repayment worth it?"].map(q=>(
+            <button key={q} onClick={()=>setChatInput(q)} style={{background:C.card,border:`1px solid ${C.border}`,color:C.muted,fontSize:12,padding:"6px 12px",borderRadius:20,cursor:"pointer"}}>{q}</button>
           ))}
         </div>}
         <div style={{flex:1,overflowY:"auto",paddingRight:4}}>
@@ -719,23 +644,12 @@ Be specific, use actual numbers. Keep answers concise with emoji. Currency is RS
           <div ref={chatEndRef}/>
         </div>
         <div style={{display:"flex",gap:10,marginTop:12,padding:"12px 0"}}>
-          <input value={chatInput} onChange={e=>setChatInput(e.target.value)}
-            onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();}}}
-            placeholder="Ask about your budget or mortgage..."
-            style={{flex:1,background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"11px 16px",color:C.text,fontSize:14,outline:"none"}}/>
-          <button onClick={sendMessage} disabled={loading||!chatInput.trim()}
-            style={{background:loading||!chatInput.trim()?C.dimmed:C.accent,color:"#fff",border:"none",borderRadius:12,width:44,height:44,fontSize:18,cursor:loading?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>→</button>
+          <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();}}} placeholder="Ask about your budget or mortgage..." style={{flex:1,background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"11px 16px",color:C.text,fontSize:14,outline:"none"}}/>
+          <button onClick={sendMessage} disabled={loading||!chatInput.trim()} style={{background:loading||!chatInput.trim()?C.dimmed:C.accent,color:"#fff",border:"none",borderRadius:12,width:44,height:44,fontSize:18,cursor:loading?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>→</button>
         </div>
       </div>}
     </div>
-    <style>{`
-      @keyframes pulse{0%,100%{opacity:0.3;transform:scale(0.8);}50%{opacity:1;transform:scale(1);}}
-      *{box-sizing:border-box;}
-      ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:${C.border};border-radius:2px;}
-      textarea:focus,input:focus{border-color:${C.accent}!important;}
-      button:hover:not(:disabled){opacity:0.88;}
-      select{appearance:none;}
-    `}</style>
+    <style>{`@keyframes pulse{0%,100%{opacity:0.3;transform:scale(0.8);}50%{opacity:1;transform:scale(1);}}*{box-sizing:border-box;}::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:${C.border};border-radius:2px;}textarea:focus,input:focus{border-color:${C.accent}!important;}button:hover:not(:disabled){opacity:0.88;}select{appearance:none;}`}</style>
   </div>;
 }
 
